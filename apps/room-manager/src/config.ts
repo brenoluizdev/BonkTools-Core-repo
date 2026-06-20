@@ -47,8 +47,8 @@ export function loadConfig(path: string): RoomManagerConfig {
 export function authFromEnv(): AuthOptions {
   const username = process.env.BONK_USERNAME;
   const password = process.env.BONK_PASSWORD;
-  if (!username || !password) {
-    throw new Error('BONK_USERNAME and BONK_PASSWORD must be set (see .env.example)');
-  }
+  // WR-03: valida cada variável independentemente para mensagens de erro claras.
+  if (!username) throw new Error('BONK_USERNAME must be set (see .env.example)');
+  if (!password) throw new Error('BONK_PASSWORD must be set (see .env.example)');
   return { type: 'registered', username, password };
 }
