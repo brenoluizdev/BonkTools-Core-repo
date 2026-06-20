@@ -92,7 +92,7 @@ const COMMANDS = new Map<string, CommandHandler>([
   [
     'exit',
     async (_args, _session, rl) => {
-      // O shutdown é instalado no index.ts via process signals; close dispara SIGINT-like cleanup.
+      // O shutdown é instalado no index.ts via rl.on('close', ...) (WR-01).
       rl.close();
     },
   ],
@@ -101,9 +101,12 @@ const COMMANDS = new Map<string, CommandHandler>([
 /**
  * Liga o REPL a uma sessão: cada linha é parseada em cmd + args e despachada via COMMANDS.
  * Comando desconhecido imprime mensagem sem lançar (T-5-04-04).
+ *
+ * CR-04: usa .catch() em vez de await direto no callback de evento para garantir que
+ * rejeições de promise dos handlers não propaguem como unhandledRejection (fatal no Node v15+).
  */
 export function startRepl(session: BonkSession, rl: readline.Interface): void {
-  rl.on('line', async (input) => {
+  rl.on('line', (input) => {
     const parts = input.trim().split(/\s+/);
     const cmd = parts[0] ?? '';
     const args = parts.slice(1);
@@ -114,6 +117,10 @@ export function startRepl(session: BonkSession, rl: readline.Interface): void {
       }
       return;
     }
-    await handler(args, session, rl);
+    handler(args, session, rl).catch((err: unknown) => {
+      process.stdout.write(
+        `Erro ao executar '${cmd}': ${err instanceof Error ? err.message : String(err)}\n`,
+      );
+    });
   });
 }
