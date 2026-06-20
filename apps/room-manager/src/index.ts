@@ -7,11 +7,18 @@ import { loadConfig, authFromEnv } from './config.js';
 import { startRepl } from './repl.js';
 import { BonkSession } from '@bonktools/core';
 
+// Guard de módulo: evita múltiplos registros de listeners em chamadas repetidas (WR-04).
+let shutdownRegistered = false;
+
 /**
  * Instala handlers idempotentes de SIGTERM/SIGINT (RM-04).
- * Guard boolean garante uma única limpeza; fecha o readline, destrói a sessão e sai.
+ * Guard de módulo impede registro duplicado de listeners (WR-04).
+ * Também ouve rl 'close' para que o comando 'exit' do REPL acione o shutdown (WR-01).
  */
 export function installShutdown(session: BonkSession, rl: readline.Interface): void {
+  if (shutdownRegistered) return;
+  shutdownRegistered = true;
+
   let shuttingDown = false;
   const handler = async (): Promise<void> => {
     if (shuttingDown) {
@@ -24,6 +31,8 @@ export function installShutdown(session: BonkSession, rl: readline.Interface): v
   };
   process.on('SIGTERM', () => void handler());
   process.on('SIGINT', () => void handler());
+  // WR-01: rl.close() (comando 'exit') aciona o mesmo handler de shutdown.
+  rl.on('close', () => void handler());
 }
 
 const program = new Command();
@@ -37,11 +46,13 @@ program
   .action(async (opts: { config: string }) => {
     const config = loadConfig(opts.config);
     const auth = authFromEnv();
+    // CR-01: quando delayMs é 0, usa Infinity (sem throttle) em vez de 1/0.
+    const delayMs = config.throttle.roomCreationDelayMs;
     const session = new BonkSession({
       auth,
       throttle: {
         capacity: config.throttle.maxConcurrentRooms,
-        refillPerSec: 1 / (config.throttle.roomCreationDelayMs / 1000),
+        refillPerSec: delayMs > 0 ? 1 / (delayMs / 1000) : Infinity,
       },
     });
     await session.getToken(auth);

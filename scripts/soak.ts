@@ -5,7 +5,7 @@
 // `tsx scripts/soak.ts` saia limpo sem precisar resolver o workspace package quando gateado.
 
 if (!process.env.BONK_SOAK) {
-  console.log('Soak test gateado: defina BONK_SOAK=1 para executar.');
+  process.stderr.write('Soak test gateado: defina BONK_SOAK=1 para executar.\n');
   process.exit(0);
 }
 
@@ -19,11 +19,13 @@ async function main(): Promise<void> {
 
   const config = loadConfig(configPath);
   const auth = authFromEnv();
+  // CR-01: quando delayMs é 0, usa Infinity (sem throttle) em vez de 1/0.
+  const delayMs = config.throttle.roomCreationDelayMs;
   const session = new BonkSession({
     auth,
     throttle: {
       capacity: config.throttle.maxConcurrentRooms,
-      refillPerSec: 1 / (config.throttle.roomCreationDelayMs / 1000),
+      refillPerSec: delayMs > 0 ? 1 / (delayMs / 1000) : Infinity,
     },
   });
 
@@ -36,10 +38,10 @@ async function main(): Promise<void> {
   }
 
   // CSV header — amostra process.memoryUsage() a cada 60s.
-  console.log('timestamp,rss,heapUsed,roomCount');
+  process.stdout.write('timestamp,rss,heapUsed,roomCount\n');
   const sample = (): void => {
     const m = process.memoryUsage();
-    console.log(`${new Date().toISOString()},${m.rss},${m.heapUsed},${session.rooms.size}`);
+    process.stdout.write(`${new Date().toISOString()},${m.rss},${m.heapUsed},${session.rooms.size}\n`);
   };
   sample();
   const interval = setInterval(sample, 60_000);
