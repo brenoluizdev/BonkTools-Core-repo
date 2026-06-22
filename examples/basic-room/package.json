@@ -1,0 +1,21 @@
+{
+  "name": "@bonktools/example-basic-room",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Exemplo mínimo de bot bonk.io com @bonktools/core",
+  "type": "module",
+  "scripts": {
+    "dev": "node --env-file=.env --import tsx/esm src/bot.ts",
+    "build": "tsup src/bot.ts --format esm --out-dir dist --no-dts",
+    "start": "node dist/bot.js"
+  },
+  "dependencies": {
+    "@bonktools/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22",
+    "tsup": "^8.5.1",
+    "tsx": "^4.22.4",
+    "typescript": "^5.7"
+  }
+}

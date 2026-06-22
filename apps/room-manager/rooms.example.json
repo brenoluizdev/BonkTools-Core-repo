@@ -1,17 +1,8 @@
 {
   "rooms": [
     {
-      "id": "sala1",
-      "name": "BonkTools Room 1",
-      "password": "",
-      "maxPlayers": 6,
-      "mode": "b",
-      "rounds": 3,
-      "hidden": false
-    },
-    {
-      "id": "sala2",
-      "name": "BonkTools Room 2",
+      "id": "1",
+      "name": "ATLAS",
       "password": "",
       "maxPlayers": 6,
       "mode": "b",

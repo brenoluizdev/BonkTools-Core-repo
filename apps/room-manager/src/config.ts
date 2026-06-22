@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { readFileSync } from 'node:fs';
 import type { AuthOptions } from '@bonktools/core';
+import { GAMEMODE_MAP, type PickConfig } from './pick/PickController.js';
 
 // ─── Schemas (D-13) ──────────────────────────────────────────────────────────
 
@@ -51,4 +52,26 @@ export function authFromEnv(): AuthOptions {
   if (!username) throw new Error('BONK_USERNAME must be set (see .env.example)');
   if (!password) throw new Error('BONK_PASSWORD must be set (see .env.example)');
   return { type: 'registered', username, password };
+}
+
+/** Lê configuração de pick (modo de jogo, maxTeamSize, rounds) do ambiente. */
+export function pickConfigFromEnv(): PickConfig {
+  const gamemode = (process.env.BONK_GAMEMODE ?? 'football').toLowerCase();
+  const spec = GAMEMODE_MAP[gamemode];
+  if (!spec) {
+    const valid = Object.keys(GAMEMODE_MAP).join(', ');
+    throw new Error(`BONK_GAMEMODE inválido: "${gamemode}". Valores válidos: ${valid}`);
+  }
+
+  const maxTeamSize = parseInt(process.env.BONK_MAXTEAMSIZE ?? '1', 10);
+  if (isNaN(maxTeamSize) || maxTeamSize < 1 || maxTeamSize > 8) {
+    throw new Error('BONK_MAXTEAMSIZE deve ser um inteiro entre 1 e 8');
+  }
+
+  const rounds = parseInt(process.env.BONK_ROUNDS ?? '3', 10);
+  if (isNaN(rounds) || rounds < 1) {
+    throw new Error('BONK_ROUNDS deve ser um inteiro >= 1');
+  }
+
+  return { gamemode, engine: spec.engine, mode: spec.mode, maxTeamSize, rounds };
 }
