@@ -124,7 +124,7 @@ room.on('chat-message', (pkt) => {
   //   }
   //   room.startGame({ is: initialState, gs: { bal } });
   //
-  // Para um bot com lógica de pick de times, veja apps/atlas no repositório.
+  // Para um bot com lógica de pick de times, veja apps/bonk-room no repositório.
   if (msg === '!start') {
     room.startGame(initialState ? { is: initialState } : undefined);
     return;
