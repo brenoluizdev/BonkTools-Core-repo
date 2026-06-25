@@ -19,7 +19,7 @@ async function main(): Promise<void> {
 
   const config = loadConfig(configPath);
   const auth = authFromEnv();
-  // CR-01: quando delayMs é 0, usa Infinity (sem throttle) em vez de 1/0.
+  // delayMs = 0 → Infinity para evitar 1/0 no throttle
   const delayMs = config.throttle.roomCreationDelayMs;
   const session = new BonkSession({
     auth,
