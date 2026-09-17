@@ -477,9 +477,53 @@ chamado por `PickController` quando um jogador entra em spec com o jogo já ativ
 **Limitação conhecida:** o bonktools não roda física de verdade — `allData.state` aqui reusa
 o MESMO `is` blob já em uso pelo TRIGGER_START ativo (posições de spawn iniciais), não um
 snapshot LIVE das posições atuais da partida. `fc` é estimado por tempo decorrido desde o
-`startGame()`, não o tick real do servidor. **Ainda não confirmado se isso é suficiente** —
-o formato de `state`/`fc` pode precisar refletir o estado atual de verdade, não o inicial,
-pra o client aceitar/renderizar corretamente. Teste ao vivo é o próximo passo.
+`startGame()`, não o tick real do servidor.
+
+### Teste real (2026-09-17) — não resolveu, e diagnóstico direto no client descarta a hipótese do WebRTC
+
+Reproduzido com 3 abas de navegador reais (Chrome via automação) no cenário exato: PlayerX +
+PlayerX2 formam 1v1, PlayerX3 entra depois com o jogo já ativo. `informInGame` confirmado
+enviado (log: `sid:4, fc:1782, stateLen:555`, sem erro do servidor). **Resultado: jogador
+ainda preso no lobby.**
+
+Diagnóstico direto no client de PlayerX3 (via `document.querySelector('#maingameframe')`,
+inspecionando o DOM real do iframe do jogo):
+
+- O elemento `#newbonklobby` (painel de lobby com roster/times) permanece **visível o tempo
+  todo** — nunca é substituído pela visão da partida.
+- O elemento `#gamerenderer` (onde o canvas do jogo real é criado) existe no DOM mas fica
+  **sempre vazio** (`innerHTML: ""`, nenhum `<canvas>` filho) — o motor de física/render nunca
+  chega a inicializar pra esse jogador. Comparado com um jogador ATIVO (ex: PlayerX), que tem
+  um `<canvas>` real dentro de `#gamerenderer` com dimensões válidas (ex: 1001x686px).
+- **Sem nenhum erro no console** — a falha é silenciosa, não uma exceção capturável.
+- A janela "Auto Joining... / P2P ready / Synchronized / ... / Joined room, awaiting first
+  data" (`#sm_connectingWindow`, texto encontrado em `alpha2s.js`) **não está relacionada a
+  isso** — é o handshake de entrada na SALA (Socket.IO + WebRTC pra todos os peers,
+  independente de partida ativa), que PlayerX3 já completa normalmente. A seção anterior
+  deste documento presumia que esse texto era sobre "assistir a partida" especificamente;
+  na prática ele é sobre entrar na sala, ponto — reclassificar essa suposição.
+- O botão "Spectate" da UI apenas manda `CHANGE_OWN_TEAM` (packet 6, `{targetTeam:0}`) —
+  **não existe nenhum packet outgoing dedicado que o client envie pra "pedir" pra assistir**
+  a uma partida ativa. O client fica passivo esperando o HOST empurrar dados suficientes.
+- Confirmado inspecionando `alpha2s.js` (bundle principal do client, minificado): os nomes
+  de campo `allData`/`stateID` existem no bundle, e o código que o CLIENT usa internamente
+  pra CONSTRUIR um INFORM_IN_GAME (quando ele próprio é host) monta exatamente
+  `{sid, allData}` como um único objeto — **o mesmo formato que o bonktools já envia**. Ou
+  seja, o formato do pacote em si não é o problema.
+
+**Conclusão:** o gatilho que falta não é o pacote 40 em si (formato confirmado correto) nem
+o handshake WebRTC (Fase A/B/C, completo e sem erros) — é o CONTEÚDO de `allData.state`
+(reusar o blob estático de spawn, e não um snapshot real da posição atual dos corpos) que
+provavelmente faz o handler de recepção do client rejeitar/ignorar silenciosamente os dados,
+sem nunca criar o canvas. Confirmar isso exigiria localizar e decodificar o handler de
+RECEBIMENTO do packet 40 dentro de `alpha2s.js` (só a construção do lado de envio foi
+localizada nesta sessão) — não foi possível dentro do tempo/contexto disponível.
+
+**Alternativa pragmática confirmada funcionando** (testada e depois revertida por ser
+disruptiva — ver commits anteriores): forçar `stopGame()`/restart quando o espectador entra,
+reusando o MESMO `is`/`bal` já validado. Funciona porque reusa o fluxo de `GAME_START` que
+o client já sabe processar (não depende de decifrar o formato de `allData`), ao custo de
+interromper a partida ativa a cada jogador novo.
 
 ---
 
