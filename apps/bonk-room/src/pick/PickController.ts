@@ -63,6 +63,11 @@ export class PickController {
   private rosters = new Map<number, number[]>();
   private specQueue: number[] = [];
   private gameActive = false;
+  // `is`/`bal` da partida ATIVA — usados por informInGame() (packet 40) pra
+  // sincronizar quem entra depois, sem precisar gerar um blob novo (o bonktools
+  // não roda física, só reusa o que já foi mandado no TRIGGER_START vigente).
+  private lastGameOpts: { is?: string; bal: Record<number, number> } | null = null;
+  private gameStartedAt = 0;
   private awaitingWinner = false;
   private winnerTimeout: NodeJS.Timeout | null = null;
   private pickMode = false;
@@ -230,6 +235,8 @@ export class PickController {
     const totalPlayers = bodyIdx - 1;
     const is = this.resolveInitialState(totalPlayers);
     const opts = is ? { is, gs: { bal } } : undefined;
+    this.lastGameOpts = { ...(is ? { is } : {}), bal };
+    this.gameStartedAt = Date.now();
     setTimeout(() => { if (!this.gameActive) this.room.startGame(opts); }, 300);
   }
 
@@ -275,9 +282,20 @@ export class PickController {
         return;
       }
 
-      // Slots insuficientes para completar — spec e continua
+      // Slots insuficientes para completar — spec e continua, SEM reiniciar o
+      // jogo (não interrompe quem já está jogando). Sincroniza esse espectador
+      // via INFORM_IN_GAME (packet 40 — ver BonkRoom.informInGame, EXPERIMENTAL,
+      // documentado em BONK_PROTOCOL.md), reusando o `is`/`bal` já em uso pela
+      // partida ativa. Fallback anterior (Fase C, relay via WebRTC) não foi
+      // suficiente sozinho; alternativa testada e confirmada, mas disruptiva,
+      // é forçar `stopGame`/restart aqui (ver histórico git).
       this.specQueue.push(id);
       this.movePlayer(id, TEAM_SPEC);
+      if (this.gameActive && this.lastGameOpts) {
+        const fc = Math.round((Date.now() - this.gameStartedAt) / (1000 / 30));
+        const { is, bal } = this.lastGameOpts;
+        this.room.informInGame(id, fc, { ...(is ? { is } : {}), gs: { bal } });
+      }
       return;
     }
 

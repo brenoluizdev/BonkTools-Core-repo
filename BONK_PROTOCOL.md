@@ -437,6 +437,52 @@ Quando nenhum mapa customizado está ativo na sala, o INFORM_IN_LOBBY deve envia
 
 ---
 
+## INFORM_IN_GAME (packet 40) — sincronizar jogador com partida já ativa
+
+**Não fazia parte do escopo original do bonktools.** Descoberto consultando documentação
+externa de terceiros ([UnmatchedBracket/DemystifyBonk](https://github.com/UnmatchedBracket/DemystifyBonk),
+`Packets.md`, seção `out40`) depois de confirmar (ver seção "Sincronização de partida" acima)
+que nem WebRTC (Fase A/B/C) nem INFORM_IN_LOBBY resolvem o bug do jogador tardio sozinhos.
+
+**O que documenta:** existe um packet dedicado, separado de INFORM_IN_LOBBY, que o host envia
+a um jogador específico (via `sid`, mesmo padrão do INFORM_IN_LOBBY — **não é broadcast**)
+quando ele entra numa sala com partida **já em andamento**. Carrega um `allData.state`
+(blob de física, mesmo papel do `is` do TRIGGER_START) + configurações — permite sincronizar
+esse jogador sem precisar de um TRIGGER_START novo (que reiniciaria o jogo pra todo mundo).
+
+### Payload (exemplo capturado, fonte: DemystifyBonk)
+
+```ts
+{
+  sid: number,           // ID do jogador a sincronizar
+  allData: {
+    state: string,       // blob de física (LZ-string) — mesmo papel do `is` de TRIGGER_START
+    stateID: number,      // não confirmado — exemplo real sempre mostrou 1
+    fc: number,           // frame count — tick da partida (~30Hz, mesma cadência do campo
+                           // `f` observado no DataChannel — ver seção WebRTC/PeerJS acima)
+    inputs: unknown[],     // não confirmado — vazio no exemplo capturado
+    admin: unknown[],      // não confirmado — vazio no exemplo capturado
+    gs: { map, gt, wl, q, tl, tea, ga, mo, bal },  // mesmo shape do TRIGGER_START (gs.map como LZ-string)
+    random: unknown[],     // não confirmado — provável seed de RNG determinístico
+  }
+}
+```
+
+### Status da implementação no bonktools (EXPERIMENTAL)
+
+Implementado em `BonkRoom.informInGame(sid, fc, opts)` (`packages/core/src/room/BonkRoom.ts`),
+chamado por `PickController` quando um jogador entra em spec com o jogo já ativo
+(`apps/bonk-room/src/pick/PickController.ts`).
+
+**Limitação conhecida:** o bonktools não roda física de verdade — `allData.state` aqui reusa
+o MESMO `is` blob já em uso pelo TRIGGER_START ativo (posições de spawn iniciais), não um
+snapshot LIVE das posições atuais da partida. `fc` é estimado por tempo decorrido desde o
+`startGame()`, não o tick real do servidor. **Ainda não confirmado se isso é suficiente** —
+o formato de `state`/`fc` pode precisar refletir o estado atual de verdade, não o inicial,
+pra o client aceitar/renderizar corretamente. Teste ao vivo é o próximo passo.
+
+---
+
 ## Sincronização de partida — WebRTC/PeerJS
 
 **Descoberta tardia (não fazia parte do escopo original do bonktools) — a física da partida em andamento não trafega pelo Socket.IO documentado acima.** Ela é sincronizada via **WebRTC peer-to-peer, sinalizado através de um broker PeerJS padrão** (sem customização — mesma `key`, mesmo formato de `id`/`token` do client PeerJS oficial). O Socket.IO cobre só a camada de lobby/roster (join, team, chat, GAME_START/GAME_END como sinalização); a física em si nunca passa por ele.

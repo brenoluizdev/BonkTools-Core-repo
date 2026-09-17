@@ -23,6 +23,7 @@
 import { EventEmitter } from 'eventemitter3';
 import WebSocket from 'ws';
 import { RTCPeerConnection } from 'werift';
+import type { RTCDataChannel } from 'werift';
 import type { Logger } from 'pino';
 
 const HEARTBEAT_INTERVAL_MS = 5000;
@@ -83,6 +84,7 @@ type BrokerMessage =
 interface PeerConnEntry {
   pc: RTCPeerConnection;
   connectionId: string;
+  channel: RTCDataChannel | null;
 }
 
 export interface PeerBrokerClientEvents {
@@ -99,6 +101,9 @@ export interface PeerBrokerClientEvents {
 export class PeerBrokerClient extends EventEmitter<PeerBrokerClientEvents> {
   private ws: WebSocket | null = null;
   private readonly connections = new Map<string, PeerConnEntry>(); // key = src peerID
+  // Fase C: última mensagem crua recebida de cada peer, pra retransmitir pra
+  // quem conectar depois (ver `relayLastKnownState`).
+  private readonly lastMessage = new Map<string, Buffer>();
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private closed = false;
 
@@ -153,6 +158,7 @@ export class PeerBrokerClient extends EventEmitter<PeerBrokerClientEvents> {
       pc.close();
     }
     this.connections.clear();
+    this.lastMessage.clear();
     this.ws?.close();
     this.ws = null;
   }
@@ -212,7 +218,7 @@ export class PeerBrokerClient extends EventEmitter<PeerBrokerClientEvents> {
     }
 
     const pc = new RTCPeerConnection();
-    const entry: PeerConnEntry = { pc, connectionId: payload.connectionId };
+    const entry: PeerConnEntry = { pc, connectionId: payload.connectionId, channel: null };
     this.connections.set(src, entry);
 
     pc.onicecandidate = (event) => {
@@ -236,6 +242,16 @@ export class PeerBrokerClient extends EventEmitter<PeerBrokerClientEvents> {
     pc.ondatachannel = (event) => {
       this.logger.debug({ src }, '[peer-broker] data channel aberto');
       const channel = event.channel;
+      entry.channel = channel;
+
+      // Fase C: cacheia a última mensagem crua recebida deste peer — é o que
+      // permite retransmitir o estado mais recente pra quem conectar depois,
+      // sem precisar entender o formato de física de verdade.
+      channel.onmessage = (msgEvent) => {
+        const data = typeof msgEvent.data === 'string' ? Buffer.from(msgEvent.data) : msgEvent.data;
+        this.lastMessage.set(src, data);
+      };
+
       const sendBootstrap = (): void => {
         try {
           channel.send(buildInputFrame(0, Date.now() & 0xffff, 0));
@@ -243,6 +259,7 @@ export class PeerBrokerClient extends EventEmitter<PeerBrokerClientEvents> {
         } catch (err) {
           this.logger.warn({ src, err: (err as Error).message }, '[peer-broker] falha enviando frame de bootstrap');
         }
+        this.relayLastKnownState(src, channel);
       };
       if (channel.readyState === 'open') {
         sendBootstrap();
@@ -269,6 +286,31 @@ export class PeerBrokerClient extends EventEmitter<PeerBrokerClientEvents> {
       this.logger.warn({ src, err: (err as Error).message }, '[peer-broker] falha respondendo OFFER');
       pc.close();
       this.connections.delete(src);
+    }
+  }
+
+  /**
+   * Fase C (EXPERIMENTAL): retransmite pro peer recém-conectado (`newSrc`) a última
+   * mensagem crua que recebemos de CADA outro peer já conectado — sem decodificar
+   * nada. Hipótese: um espectador que entra depois de uma partida já ativa fica
+   * preso em "awaiting first data" (ver BONK_PROTOCOL.md, Pitfall 10) porque nunca
+   * recebe física de ninguém; o host, por já estar conectado a todo mundo via
+   * malha completa, pode servir de "cache" e entregar um retrato do estado mais
+   * recente sem precisar reiniciar a partida pra todo mundo (alternativa ao
+   * restart forçado no PickController).
+   */
+  private relayLastKnownState(newSrc: string, newChannel: RTCDataChannel): void {
+    for (const [otherSrc, buf] of this.lastMessage) {
+      if (otherSrc === newSrc) continue;
+      try {
+        newChannel.send(buf);
+        this.logger.debug(
+          { newSrc, fromSrc: otherSrc, bytes: buf.length },
+          '[peer-broker] estado retransmitido (Fase C experimental)',
+        );
+      } catch (err) {
+        this.logger.warn({ newSrc, fromSrc: otherSrc, err: (err as Error).message }, '[peer-broker] falha retransmitindo estado');
+      }
     }
   }
 

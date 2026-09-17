@@ -11,7 +11,7 @@ import { BonkTransport } from '../transport/BonkTransport.js';
 import { decodeWithZod } from '../codec/decode.js';
 import { TERMINAL_STATUS_CODES, OUTGOING_PACKET_IDS } from '../codec/packets.js';
 import type { StartGameOptions, InformInLobbyPayload } from '../codec/packets.js';
-import { encodeStartGame } from '../codec/encode.js';
+import { encodeStartGame, encodeInformInGame } from '../codec/encode.js';
 import type { StatusCode, IncomingPacket, UnknownPacket } from '../codec/packets.js';
 import {
   createEmptyRoomState,
@@ -262,6 +262,23 @@ export class BonkRoom extends EventEmitter<BonkRoomEvents> {
       '[GAME] startGame → enviando TRIGGER_START',
     );
     this.transport.sendPacket(OUTGOING_PACKET_IDS.TRIGGER_START, payload);
+  }
+
+  /**
+   * Sincroniza um jogador específico com a partida JÁ ATIVA (packet 40 —
+   * INFORM_IN_GAME), sem reiniciar o jogo pra ninguém. EXPERIMENTAL: ver
+   * documentação em `packets.ts`/`BONK_PROTOCOL.md` — o campo `allData` não
+   * tem confirmação oficial, e `opts.is` aqui deve ser o MESMO blob já usado
+   * pelo `startGame()` ativo (não um blob novo).
+   */
+  informInGame(sid: number, fc: number, opts?: StartGameOptions): void {
+    if (!this.transport) {
+      this.logger.warn({ sid }, 'informInGame: transport não conectado — packet descartado');
+      return;
+    }
+    const payload = encodeInformInGame(sid, this.desiredState, fc, opts);
+    this.logger.info({ sid, fc, stateLen: payload.allData.state.length }, '[GAME] informInGame → enviando INFORM_IN_GAME');
+    this.transport.sendPacket(OUTGOING_PACKET_IDS.INFORM_IN_GAME, payload);
   }
 
   /** Marca o PRÓPRIO bot como ready/not-ready (packet 16 — SET_READY). */
