@@ -28,6 +28,7 @@ import {
   reduceBalanceSet,
 } from './RoomState.js';
 import { defaultReconnectPolicy, computeBackoff } from './ReconnectPolicy.js';
+import { PeerBrokerClient } from '../webrtc/PeerBrokerClient.js';
 import type { BonkRoomEvents, BonkRoomOptions, RoomDeadReason } from './types.js';
 import type { RoomState } from './RoomState.js';
 import type { ReconnectPolicy } from './ReconnectPolicy.js';
@@ -100,6 +101,7 @@ export class BonkRoom extends EventEmitter<BonkRoomEvents> {
   private readonly logger: Logger;
   private readonly options: BonkRoomOptions;
   private _shareLink: string | null = null;
+  private peerBroker: PeerBrokerClient | null = null;
 
   constructor(options: BonkRoomOptions) {
     super(); // EventEmitter3
@@ -156,6 +158,18 @@ export class BonkRoom extends EventEmitter<BonkRoomEvents> {
     this.attachTransportListeners(this.transport);
     await this.transport.connect();
     this.roomStatus = 'connecting';
+
+    // PeerBrokerClient só faz sentido em modo real (transportOptions com server de
+    // verdade) — sem isso não há host/porta pra conectar, e os testes usam transport
+    // mock sem rede real. Ver PeerBrokerClient.ts pra contexto completo do porquê.
+    if (this.options.transportOptions && this.options.peerID && !this.peerBroker) {
+      this.peerBroker = new PeerBrokerClient(
+        this.options.transportOptions.server.server,
+        this.options.peerID,
+        this.logger,
+      );
+      this.peerBroker.connect();
+    }
   }
 
   /**
@@ -169,6 +183,8 @@ export class BonkRoom extends EventEmitter<BonkRoomEvents> {
     this.roomStatus = 'idle';
     this.transport?.disconnect();
     this.transport = null;
+    this.peerBroker?.disconnect();
+    this.peerBroker = null;
     this._state = createEmptyRoomState();
   }
 

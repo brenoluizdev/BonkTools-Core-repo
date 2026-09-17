@@ -93,6 +93,14 @@ export interface DesiredRoomState {
  */
 export interface BonkRoomOptions {
   desiredState: DesiredRoomState;
+  /**
+   * peerID já usado no CREATE_ROOM/JOIN_ROOM (AuthClient.generatePeerID()) — necessário
+   * pra abrir o PeerBrokerClient com o MESMO id que outros clients já conhecem via
+   * roster (PLAYER_JOIN/ROOM_JOIN). Sem isso, o handshake WebRTC (ver PeerBrokerClient)
+   * não é iniciado e conexões de jogadores endereçadas a este host expiram.
+   * Opcional só pra não quebrar injeção de transport mock nos testes (sem rede real).
+   */
+  peerID?: string;
   /** Usado em modo real (produção). Mutuamente exclusivo com `transport`. */
   transportOptions?: BonkTransportOptions;
   /** Transport injetado para testes de unidade (MockTransport). */
