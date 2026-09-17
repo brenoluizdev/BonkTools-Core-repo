@@ -18,6 +18,7 @@ Documentação do protocolo de rede do [bonk.io](https://bonk.io), obtida por an
 - [GameSettings e TRIGGER_START](#gamesettings-e-trigger_start)
 - [IS blob — Initial State](#is-blob--initial-state)
 - [INFORM_IN_LOBBY](#inform_in_lobby)
+- [Sincronização de partida — WebRTC/PeerJS](#sincronização-de-partida--webrtcpeerjs)
 - [Heartbeat e anti-idle](#heartbeat-e-anti-idle)
 - [StatusCodes](#statuscodes)
 - [Armadilhas e pitfalls](#armadilhas-e-pitfalls)
@@ -436,6 +437,122 @@ Quando nenhum mapa customizado está ativo na sala, o INFORM_IN_LOBBY deve envia
 
 ---
 
+## Sincronização de partida — WebRTC/PeerJS
+
+**Descoberta tardia (não fazia parte do escopo original do bonktools) — a física da partida em andamento não trafega pelo Socket.IO documentado acima.** Ela é sincronizada via **WebRTC peer-to-peer, sinalizado através de um broker PeerJS padrão** (sem customização — mesma `key`, mesmo formato de `id`/`token` do client PeerJS oficial). O Socket.IO cobre só a camada de lobby/roster (join, team, chat, GAME_START/GAME_END como sinalização); a física em si nunca passa por ele.
+
+Isso foi descoberto investigando um bug relatado: jogadores que entram numa sala **durante** uma partida já ativa ficam presos na tela de lobby, sem nunca ver o jogo em andamento (issue original: bot headless não completava handshake WebRTC e a conexão expirava — ver Pitfall 10).
+
+### Descoberta do broker
+
+Capturada interceptando `WebSocket` dentro do `#maingameframe` do client real:
+
+```
+wss://<server>.bonk.io/myapp/peerjs?key=peerjs&id=<peerID>&token=<token>
+```
+
+- `<server>` — mesmo hostname da conexão Socket.IO principal (`BonkTransport`)
+- `key=peerjs` — chave padrão do servidor PeerJS (sem customização)
+- `id=<peerID>` — o MESMO peerID já gerado localmente e enviado em CREATE_ROOM/JOIN_ROOM (ver [PeerID](#peerid)) — é assim que outros clients sabem pra qual id endereçar um `OFFER`
+- `token=<token>` — token de sessão gerado pelo client, ~11 chars base36 (`Math.random().toString(36).slice(2)`, mesmo default do client PeerJS oficial)
+
+### Topologia — malha completa
+
+**Todo client abre uma conexão WebRTC com TODO OUTRO peer da sala — incluindo o host**, mesmo que o host nunca jogue (seja só um bot administrativo em spec). Confirmado comparando:
+
+- Host real (navegador) recebendo `OFFER` de um jogador → responde `ANSWER` + troca `CANDIDATE` normalmente, sem `EXPIRE`.
+- Host headless (bonktools, antes do fix) recebendo o mesmo `OFFER` → nunca responde (sem WebRTC implementado) → o peer que ofertou recebe `EXPIRE` depois de um tempo.
+
+Isso significa que **o host precisa participar do handshake WebRTC mesmo sem jogar** — não existe um jeito de "opt-out"/sinalizar ao client real pra não esperar pelo host.
+
+### Mensagens do broker (protocolo PeerJS)
+
+Frames de texto JSON, todos vistos em captura real:
+
+```jsonc
+// Incoming — conexão pronta
+{ "type": "OPEN" }
+
+// Outgoing — proposta de conexão P2P (quem entra na sala oferta pra cada peer existente)
+{
+  "type": "OFFER",
+  "payload": {
+    "sdp": { "sdp": "v=0\r\no=- ...", "type": "offer" },
+    "type": "data",
+    "connectionId": "dc_usb7f3jh52",
+    "browser": "chrome",
+    "label": "dc_usb7f3jh52",
+    "reliable": false,
+    "serialization": "binary"
+  },
+  "dst": "<peerID do destinatário>"
+}
+
+// Incoming — resposta ao OFFER
+{
+  "type": "ANSWER",
+  "src": "<peerID de quem respondeu>",
+  "dst": "<meu peerID>",
+  "payload": { "sdp": { "sdp": "v=0\r\no=- ...", "type": "answer" }, "type": "data", "connectionId": "dc_usb7f3jh52" }
+}
+
+// Incoming/Outgoing — troca de candidatos ICE (várias por conexão)
+{
+  "type": "CANDIDATE",
+  "payload": {
+    "candidate": { "candidate": "candidate:...", "sdpMid": "0", "sdpMLineIndex": 0, "usernameFragment": "..." },
+    "type": "data",
+    "connectionId": "dc_usb7f3jh52"
+  },
+  "dst": "<peerID>"
+}
+
+// Incoming — peer não respondeu ao OFFER a tempo (handshake nunca completou)
+{ "type": "EXPIRE", "src": "<peerID que não respondeu>", "dst": "<meu peerID>" }
+
+// Outgoing — keep-alive periódico (~5s)
+{ "type": "HEARTBEAT" }
+```
+
+`serialization: "binary"` no `OFFER` indica que o DataChannel usa `binaryType` binário — na prática chega como `Blob` no navegador (não `ArrayBuffer` direto; é preciso setar `channel.binaryType = 'arraybuffer'` ou ler via `Blob.arrayBuffer()` pra inspecionar).
+
+### DataChannel — formato binário customizado (parcialmente decodificado)
+
+O payload trafegado pelo DataChannel (não pelo broker — isso é depois do handshake completo, canal peer-to-peer direto) é um formato binário compacto próprio, **não é JSON nem MessagePack padrão**. Exemplo real capturado (12 bytes, disparado por um evento de tecla):
+
+```
+83 b1 69 02 b1 66 cd 07 68 b1 63 00
+```
+
+Estrutura observada (comparando várias amostras consecutivas):
+
+| Offset | Bytes | Papel observado |
+|---|---|---|
+| 0 | `83` | Constante — possível tipo/versão de packet |
+| 1 | `b1` | Constante — marcador antes de cada campo |
+| 2 | `69` | Constante — `'i'` (nome do campo 1) |
+| 3 | *varia* | Valor do campo `i` — provavelmente bitmask de teclas pressionadas |
+| 4 | `b1` | Constante — marcador |
+| 5 | `66` | Constante — `'f'` (nome do campo 2) |
+| 6 | `cd` | Constante — tag de uint16 big-endian |
+| 7–8 | *varia* | Valor do campo `f` — contador incrementando ~30 unidades/segundo (tick a ~30Hz) |
+| 9 | `b1` | Constante — marcador |
+| 10 | `63` | Constante — `'c'` (nome do campo 3) |
+| 11 | *varia* | Valor do campo `c` — contador sequencial, +1 por mensagem enviada |
+
+**Não confirmado ainda:** o significado exato do campo `i` (bitmask de teclas?), se existem mais campos em mensagens maiores (ex: posição/velocidade), e — mais importante — **o formato da mensagem de "bootstrap" que o host manda pra um client recém-conectado**.
+
+### Estado "awaiting first data" — o problema real do jogador tardio
+
+O client tem uma etapa explícita no fluxo de conexão P2P (visível na UI: "Auto Joining... → P2P ready → Synchronized → Requesting to join room... → **Joined room, awaiting first data**"). Confirmado que:
+
+- Um host real, mesmo **sozinho** (sem ninguém jogando), deixa um client novo passar dessa etapa — ou seja, o host manda *alguma* mensagem inicial pelo DataChannel só de ter um peer conectado, independente de haver partida ativa.
+- O bonktools (mesmo já implementando o handshake completo — ver Pitfall 10 corrigido) **nunca envia nada** pelo DataChannel depois de aberto. Resultado: o client do jogador completa o handshake (sem `EXPIRE`) mas fica preso indefinidamente em "awaiting first data" / tela de lobby, porque nunca recebe o que está esperando.
+
+**Isso ainda não foi capturado com certeza** (a mensagem de bootstrap do host real) — é o próximo passo pra resolver o bug do jogador tardio de forma completa.
+
+---
+
 ## Heartbeat e anti-idle
 
 ### Heartbeat TIMESYNC
@@ -571,6 +688,14 @@ O ID `20` no sentido cliente→servidor é `SEND_MODE`. O ID `20` no sentido ser
 ### Pitfall 9 — bal: [] pode causar spawns incorretos em football com IDs não-contíguos
 
 Se jogadores saíram e entraram durante a sessão, os IDs de jogadores podem ter gaps (ex: IDs 0, 2, 4 — o ID 1 e 3 saíram). Com `bal: []`, o servidor atribui bro bodies em ordem crescente de ID, o que pode resultar em um jogador BLUE spawning no lado RED. Use mapeamento explícito `{playerId: bodyIndex}` para garantir a atribuição correta.
+
+### Pitfall 10 — completar o handshake WebRTC não é suficiente pro jogador ver a partida
+
+Um host headless que nunca implementou WebRTC/PeerJS (ver [Sincronização de partida](#sincronização-de-partida--webrtcpeerjs)) faz qualquer jogador que entra na sala ficar com uma conexão pra ele permanentemente pendente — o `OFFER` deles nunca é respondido e expira (`EXPIRE`). Isso por si só já impede o jogador de renderizar uma partida em andamento.
+
+**Mas corrigir só isso (responder o handshake) não resolve o problema por completo.** Confirmado ao vivo: um host que completa o handshake (responde `ANSWER`, troca `CANDIDATE`, sem `EXPIRE`) mas nunca manda nada pelo DataChannel depois de aberto deixa o jogador preso em "awaiting first data" (ver seção acima) do mesmo jeito — só que sem o sintoma óbvio do `EXPIRE` pra apontar a causa. O host real manda alguma mensagem de bootstrap pelo DataChannel assim que um peer conecta, mesmo sem partida ativa — isso ainda precisa ser capturado e reproduzido.
+
+**Lição:** ao debugar esse tipo de sintoma ("cliente conectado mas não sincroniza"), sempre confirmar tanto (a) o handshake de sinalização completou sem `EXPIRE` quanto (b) dados reais estão trafegando pelo canal depois de aberto — os dois podem falhar de forma independente e produzem o mesmo sintoma visível (jogador preso no lobby).
 
 ---
 
