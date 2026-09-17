@@ -1,4 +1,4 @@
-import type { BonkRoom } from '@bonktools/core';
+import type { BonkRoom, MapBlobCache } from '@bonktools/core';
 import { TEAM_SPEC, TEAM_FFA, TEAM_BLUE, TEAM_RED, TEAM_GREEN, TEAM_YELLOW } from '@bonktools/core';
 
 export { TEAM_SPEC, TEAM_FFA, TEAM_BLUE, TEAM_RED, TEAM_GREEN, TEAM_YELLOW };
@@ -36,8 +36,20 @@ export interface PickConfig {
   rounds: number;
   /** Blob LZ-String fallback (legado / BONK_INITIAL_STATE). */
   initialState?: string;
-  /** Blobs por jogadores ativos (excluindo bot): { "1": solo, "2": 1v1, "4": 2v2 }. */
+  /**
+   * Blobs por jogadores ativos (excluindo bot): { "1": solo, "2": 1v1, "4": 2v2 }.
+   * ATENÇÃO: só são seguros se a sala estiver no MESMO mapa em que foram capturados
+   * (o IS blob codifica spawn positions específicas do mapa). Usados como último
+   * fallback, depois do cache por mapa — ver `mapBlobCache`.
+   */
   initialStates?: Record<string, string>;
+  /**
+   * Cache local de IS blobs por (mapa, jogadores ativos) — ver `packages/core/src/cache/mapBlobCache.ts`.
+   * Quando presente, é a fonte PREFERIDA de blob em `autoStart()`: correta para
+   * qualquer mapa, ao contrário de `initialState`/`initialStates` que assumem um
+   * mapa fixo. Populado pelo seeder (`apps/blob-seeder`) ou por captura manual.
+   */
+  mapBlobCache?: MapBlobCache;
 }
 
 export class PickController {
@@ -157,8 +169,46 @@ export class PickController {
     });
   }
 
+  /**
+   * Resolve o IS blob a usar para `totalPlayers` jogadores ativos.
+   * Ordem de preferência:
+   *   1. Cache por mapa (`mapBlobCache`) — correto para o mapa ATUAL da sala.
+   *   2. `initialStates`/`initialState` legados — só válidos se a sala estiver
+   *      no mesmo mapa em que foram capturados (não garantido para mapas
+   *      aleatórios; ver aviso em `PickConfig.initialStates`).
+   * Loga um aviso quando cai no fallback legado ou quando não há blob algum —
+   * nesses casos o GAME_START pode chegar com `is` incorreto/vazio e o client
+   * do jogador trava no lobby (RangeError na engine de física).
+   */
+  private resolveInitialState(totalPlayers: number): string | undefined {
+    const cached = this.cfg.mapBlobCache?.getForMap(this.room.currentMap, totalPlayers);
+    if (cached) return cached;
+
+    const legacy = this.cfg.initialStates?.[String(totalPlayers)] ?? this.cfg.initialState;
+    if (legacy) {
+      process.stdout.write(
+        `[WARN] sem blob no cache para este mapa (${totalPlayers} jogadores) — usando fallback legado, ` +
+        'pode quebrar o client se o mapa atual for diferente do capturado\n',
+      );
+      return legacy;
+    }
+
+    process.stdout.write(
+      `[WARN] nenhum IS blob disponível para ${totalPlayers} jogadores neste mapa — ` +
+      'GAME_START sairá sem física válida. Rode o seeder (apps/blob-seeder) pra esse mapa.\n',
+    );
+    return undefined;
+  }
+
   private autoStart(): void {
     if (this.gameActive) return;
+    // Guarda contra corrida: chamadas agendadas (setTimeout 500ms) por onPlayerLeave
+    // checam "anyFilled" no momento do agendamento, não da execução. Se todos os
+    // jogadores ativos saírem nesse intervalo (desconexão em massa quase simultânea),
+    // autoStart() executaria com times vazios e dispararia um GAME_START fantasma
+    // (players: [], is vazio) sem ninguém na sala pra ver.
+    const anyFilled = this.activeTeams.some(t => (this.rosters.get(t)?.length ?? 0) > 0);
+    if (!anyFilled) return;
     if (this.winnerTimeout) { clearTimeout(this.winnerTimeout); this.winnerTimeout = null; }
     this.awaitingWinner = false;
     // Re-aplica times do roster (servidor pode ter resetado após GAME_END)
@@ -177,7 +227,8 @@ export class PickController {
     }
 
     // Chave = número de jogadores ativos (exclui bot): 1=solo, 2=1v1, 4=2v2
-    const is = this.cfg.initialStates?.[String(bodyIdx - 1)] ?? this.cfg.initialState;
+    const totalPlayers = bodyIdx - 1;
+    const is = this.resolveInitialState(totalPlayers);
     const opts = is ? { is, gs: { bal } } : undefined;
     setTimeout(() => { if (!this.gameActive) this.room.startGame(opts); }, 300);
   }
