@@ -7,3 +7,5 @@ dist/
 !.env.example
 coverage/
 .vitest/
+map-blob-cache.json
+captured-blobs.json
