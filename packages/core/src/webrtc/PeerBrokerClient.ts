@@ -28,6 +28,28 @@ import type { Logger } from 'pino';
 const HEARTBEAT_INTERVAL_MS = 5000;
 const RECONNECT_DELAY_MS = 3000;
 
+/**
+ * Fase B (EXPERIMENTAL, não confirmado): formato binário customizado observado
+ * no DataChannel, capturado ao vivo (ver BONK_PROTOCOL.md — "Sincronização de
+ * partida"). 12 bytes, 3 campos com marcador fixo 0xb1 + 1 char ascii + valor:
+ *   i (offset 3)   — 1 byte,  provável bitmask de teclas pressionadas
+ *   f (offset 7-8) — uint16 big-endian (tag 0xcd), tick a ~30Hz
+ *   c (offset 11)  — 1 byte,  contador sequencial da mensagem
+ *
+ * Hipótese a testar: o client trava em "awaiting first data" (ver
+ * BONK_PROTOCOL.md, Pitfall 10) esperando QUALQUER mensagem nesse formato do
+ * host, não uma mensagem específica — mandar um frame "neutro" (sem teclas,
+ * seq=0) assim que o canal abre pode ser suficiente pra destravar, sem
+ * precisar entender/relayar dados de física de verdade.
+ */
+function buildInputFrame(iValue: number, tick: number, seq: number): Buffer {
+  return Buffer.from([
+    0x83, 0xb1, 0x69, iValue & 0xff,
+    0xb1, 0x66, 0xcd, (tick >> 8) & 0xff, tick & 0xff,
+    0xb1, 0x63, seq & 0xff,
+  ]);
+}
+
 /** Gera um token de sessão no mesmo formato do client PeerJS oficial (~11 chars base36). */
 function generateToken(): string {
   return Math.random().toString(36).slice(2);
@@ -211,10 +233,22 @@ export class PeerBrokerClient extends EventEmitter<PeerBrokerClientEvents> {
       });
     };
 
-    pc.ondatachannel = () => {
-      // Fase A: só mantém o canal aberto (o handshake em si já resolve o EXPIRE).
-      // Relay de dados de física fica pra Fase B, se necessário.
-      this.logger.debug({ src }, '[peer-broker] data channel aberto (sem relay — Fase A)');
+    pc.ondatachannel = (event) => {
+      this.logger.debug({ src }, '[peer-broker] data channel aberto');
+      const channel = event.channel;
+      const sendBootstrap = (): void => {
+        try {
+          channel.send(buildInputFrame(0, Date.now() & 0xffff, 0));
+          this.logger.debug({ src }, '[peer-broker] frame de bootstrap (Fase B experimental) enviado');
+        } catch (err) {
+          this.logger.warn({ src, err: (err as Error).message }, '[peer-broker] falha enviando frame de bootstrap');
+        }
+      };
+      if (channel.readyState === 'open') {
+        sendBootstrap();
+      } else {
+        channel.onopen = sendBootstrap;
+      }
     };
 
     try {
