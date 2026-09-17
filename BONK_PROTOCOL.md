@@ -551,6 +551,44 @@ O client tem uma etapa explícita no fluxo de conexão P2P (visível na UI: "Aut
 
 **Isso ainda não foi capturado com certeza** (a mensagem de bootstrap do host real) — é o próximo passo pra resolver o bug do jogador tardio de forma completa.
 
+### Fase B (frame de bootstrap neutro) — testada, NÃO resolve com jogadores reais ativos
+
+Implementação: `PeerBrokerClient` manda um frame neutro no formato i/f/c (ver seção anterior)
+pelo DataChannel assim que ele abre, pra cada peer que conecta no host.
+
+**Teste real (2026-09-17)**: sala com bot host + 3 jogadores reais. `maxTeamSize=1`. Timeline:
+1. PlayerX entra (id=1) → vira team 1 (host, sozinho).
+2. New Player entra (id=2) → PickController monta 1v1 (PlayerX vs New Player), `GAME_START` disparado.
+3. New Player2 entra (id=3) **enquanto o 1v1 já está ativo** → PickController corretamente
+   força `team=0` (spectator) — como não sobra vaga, **nenhum `GAME_START`/`RETURN_TO_LOBBY`
+   é disparado** para acomodar o 3º jogador (comportamento correto do PickController: só
+   reorganiza times quando há vaga).
+4. Confirmado no log: o handshake WebRTC do New Player2 com o host completa normalmente,
+   zero `EXPIRE`, e o frame de bootstrap (Fase B) é enviado assim que o `DataChannel` abre.
+5. **Resultado relatado pelo usuário: bug persiste.** New Player2 continua vendo só o lobby,
+   mesmo com Fase A + Fase B funcionando tecnicamente sem erros.
+
+**Conclusão**: a hipótese da Fase B ("qualquer mensagem do host destrava o client") estava
+incompleta. O teste anterior que "confirmou" isso (host sozinho, sem partida ativa) não é
+comparável — nesse caso o jogador que entra *se torna* o próprio jogo (vira participante,
+não spectator observando outros). Já com uma partida real ativa entre OUTROS dois jogadores,
+o bootstrap do host não é suficiente. Hipótese revisada: o cliente que assiste (spectator)
+provavelmente precisa dos dados de física reais vindos das conexões WebRTC com os jogadores
+ATIVOS (PlayerX ↔ New Player2, New Player ↔ New Player2) — que são peer-to-peer diretas entre
+clients reais, fora do controle do bonktools. Ainda não sabemos se:
+(a) os clients reais simplesmente não mandam nada pra um peer recém-conectado por padrão
+    (bug/limitação do próprio bonk.io, não do bonktools), ou
+(b) o host tem um papel de retransmissor: como está conectado a todos via malha completa,
+    ele recebe a física dos jogadores ativos e deveria reencaminhar um snapshot pro
+    recém-chegado — e o bonktools atualmente não lê nem retransmite nada recebido nos seus
+    próprios DataChannels (`PeerBrokerClient` não tem handler de `channel.onmessage`).
+
+**Não confirmado ainda**: não existe, até agora, nenhum teste-baseline com host 100% real
+(navegador, sem bonktools) reproduzindo o mesmo cenário (3 jogadores reais, 3º entra com 1v1
+já ativo) pra saber se esse bug é inerente ao bonk.io ou seria resolvido só com o bot
+retransmitindo dados. Esse teste-baseline é o próximo passo mais informativo antes de
+investir em qualquer relay de física.
+
 ---
 
 ## Heartbeat e anti-idle
