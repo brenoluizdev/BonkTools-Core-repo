@@ -519,23 +519,27 @@ sem nunca criar o canvas. Confirmar isso exigiria localizar e decodificar o hand
 RECEBIMENTO do packet 40 dentro de `alpha2s.js` (só a construção do lado de envio foi
 localizada nesta sessão) — não foi possível dentro do tempo/contexto disponível.
 
-### Achados da sessão seguinte (2026-09-18) — ordem de envio + semântica real do `allData`
+### RESOLVIDO (2026-09-18) — o client só aceita UM pacote de dados iniciais
 
-1. **Bug de ordem (corrigido, NÃO testado ao vivo):** em `BonkRoom` o `emit('player-join')`
-   rodava ANTES do `INFORM_IN_LOBBY` (packet 11). O `PickController` chama `informInGame`
-   de forma síncrona nesse listener, então o packet 40 saía antes do 11 — o client recebia
-   dados de jogo sem ter recebido o lobby. Agora o `emit` vem depois do INFORM_IN_LOBBY.
-   Se isso sozinho resolver, o "conteúdo do state" não era o problema.
-2. **Semântica real do `allData`** (construção no `alpha2s.js`, offset ~2674187): quando o
-   client é host, `state` = snapshot LZString do frame `stateID = max(fc-120, 0)` (com troca
-   de caixa nos primeiros 101 chars), `inputs` = `{p,f,i}` por jogador do intervalo
-   stateID..fc, `admin` = `{f,a}` dos frames ≥ stateID, `random` = estado do RNG da física.
-   O bonktools manda `is` (frame 0), `stateID:1`, `inputs:[]`, `random:[]`. O prefixo do `is`
-   capturado é idêntico ao do `state` de exemplo da DemystifyBonk (mesmo formato de blob).
-3. O handler de RECEPÇÃO segue não localizado: a tabela de strings do bundle é decodificada em
-   runtime (`M$QCc`/`B3jF8`), então grep estático não acha `.allData` de leitura.
-   Próximo passo se (1) não bastar: hook via puppeteer (já em node_modules) no client do
-   espectador, ou testar `stateID:0`/`fc` pequeno/`random` não vazio.
+**Causa raiz confirmada** (inspeção dinâmica do client via CDP, sem alterar o bundle): o
+INFORM_IN_GAME chega ao spectator como **incoming 48** e o handler dele () começa
+com  — flag de "dados iniciais já recebidos", já setada pelo
+INFORM_IN_LOBBY (incoming 21) que o host mandava SEMPRE antes. O 48 era entregue e ignorado na
+primeira linha, sem tocar em / (por isso sem erro nem canvas). As hipóteses anteriores
+(conteúdo de , ordem de envio, WebRTC) estavam erradas — o blob de spawn reusado
+funciona.
+
+**Regra:** com partida ativa o host deve mandar INFORM_IN_GAME **em vez de** INFORM_IN_LOBBY,
+nunca os dois. Implementado em  (guarda  = opts do startGame + instante do
+GAME_START; no PLAYER_JOIN escolhe o pacote).  é estimado por tempo (~30Hz); o handler aborta
+com erro 701 se , então  estimado por baixo é seguro.
+Validado ao vivo (puppeteer, 3 clients, futebol 1v1 + spectator tardio): canvas renderizado,
+lobby oculto, sem reiniciar a partida.
+
+Como inspecionar (útil p/ próximos bugs de client): hook em  captura
+os emitters do socket.io; o  do handler dá acesso a // e aos
+listeners internos ( é o despachante de eventos; o nome do 48 é ).
+Reescrever o alpha2s.js NÃO funciona (anti-adulteração).
 
 **Alternativa pragmática confirmada funcionando** (testada e depois revertida por ser
 disruptiva — ver commits anteriores): forçar `stopGame()`/restart quando o espectador entra,
