@@ -706,6 +706,16 @@ investir em qualquer relay de física.
 
 ---
 
+## Team lock (packet 7) e `gs.tl` — congelamento dos jogadores
+
+`TEAM_LOCK` (out 7, `{teamLock: bool}`) impede os jogadores de trocarem de time; só o host move (`CHANGE_OTHER_TEAM`, out 26). O servidor devolve `TEAMLOCK_TOGGLE` (in 19) também ao host, e limita a frequência (`rate_limit_tl`, status 16) — não repita o packet em rajada.
+
+**Pitfall (validado com jogadores reais, 2026-09-18):** o campo `gs.tl` do `TRIGGER_START` (out 5) e do `INFORM_IN_GAME` (out 40) **precisa refletir o lock real da sala**. Com a sala travada e `gs.tl: false` (valor fixo que a lib mandava), a partida iniciava mas **ninguém conseguia se mover**: os discos ficavam parados no spawn, claros e sem nome, embora os clients continuassem enviando frames de input. Com `gs.tl` igual ao estado do lock, todos se movem normalmente. `BonkRoom` agora preenche `gs.tl` a partir de `state.teamsLocked`.
+
+Método de diagnóstico (mede movimento de verdade, não só frames): comparar screenshots do campo antes/depois de segurar uma tecla; "frames de input chegando ao host" NÃO prova que o disco se move.
+
+---
+
 ## Heartbeat e anti-idle
 
 ### Heartbeat TIMESYNC
