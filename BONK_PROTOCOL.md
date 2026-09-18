@@ -522,23 +522,24 @@ localizada nesta sessão) — não foi possível dentro do tempo/contexto dispon
 ### RESOLVIDO (2026-09-18) — o client só aceita UM pacote de dados iniciais
 
 **Causa raiz confirmada** (inspeção dinâmica do client via CDP, sem alterar o bundle): o
-INFORM_IN_GAME chega ao spectator como **incoming 48** e o handler dele () começa
-com  — flag de "dados iniciais já recebidos", já setada pelo
+INFORM_IN_GAME chega ao spectator como **incoming 48** e o handler dele (`recvInGame`) começa
+com `if (v$q[91]) return;` — flag de "dados iniciais já recebidos", já setada pelo
 INFORM_IN_LOBBY (incoming 21) que o host mandava SEMPRE antes. O 48 era entregue e ignorado na
-primeira linha, sem tocar em / (por isso sem erro nem canvas). As hipóteses anteriores
-(conteúdo de , ordem de envio, WebRTC) estavam erradas — o blob de spawn reusado
+primeira linha, sem tocar em `state`/`gs` (por isso sem erro nem canvas). As hipóteses anteriores
+(conteúdo de `allData.state`, ordem de envio, WebRTC) estavam erradas — o blob de spawn reusado
 funciona.
 
 **Regra:** com partida ativa o host deve mandar INFORM_IN_GAME **em vez de** INFORM_IN_LOBBY,
-nunca os dois. Implementado em  (guarda  = opts do startGame + instante do
-GAME_START; no PLAYER_JOIN escolhe o pacote).  é estimado por tempo (~30Hz); o handler aborta
-com erro 701 se , então  estimado por baixo é seguro.
+nunca os dois. Implementado em `BonkRoom` (guarda `activeGame` = opts do startGame + instante do
+GAME_START; no PLAYER_JOIN escolhe o pacote). `fc` é estimado por tempo (~30Hz); o handler aborta
+com erro 701 se `agora − início − fc·33ms > 30s`, então `fc` estimado por baixo é seguro.
 Validado ao vivo (puppeteer, 3 clients, futebol 1v1 + spectator tardio): canvas renderizado,
 lobby oculto, sem reiniciar a partida.
 
-Como inspecionar (útil p/ próximos bugs de client): hook em  captura
-os emitters do socket.io; o  do handler dá acesso a // e aos
-listeners internos ( é o despachante de eventos; o nome do 48 é ).
+Como inspecionar (útil p/ próximos bugs de client): hook em `Object.prototype._callbacks` captura
+os emitters do socket.io; o `[[Scopes]]` do handler (via CDP `Runtime.getProperties`) dá acesso a
+`w0O`/`k7V`/`M$QCc` e aos listeners internos (`W7P(nome, dados)` é o despachante de eventos; o
+nome do 48 é `recvInGame`).
 Reescrever o alpha2s.js NÃO funciona (anti-adulteração).
 
 **Alternativa pragmática confirmada funcionando** (testada e depois revertida por ser
