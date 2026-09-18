@@ -519,8 +519,9 @@ export class BonkRoom extends EventEmitter<BonkRoomEvents> {
       case 'PLAYER_JOIN':
         this._state = reducePlayerJoin(this._state, packet);
         this.logger.info({ playerId: packet.id, userName: packet.userName, team: packet.team }, '[ROSTER] PLAYER_JOIN');
-        this.emit('player-join', packet);
         // Protocolo obrigatório: host deve enviar INFORM_IN_LOBBY (out 11) ao jogador que entrou.
+        // O emit('player-join') vem DEPOIS: listeners (ex: PickController) podem mandar
+        // INFORM_IN_GAME (out 40) de forma síncrona, e ele precisa chegar após o lobby.
         // Sem esse packet, o bonk.io não entrega "Initial data" ao jogador → timeout no cliente.
         if (this._state.myId !== null && this._state.myId === this._state.hostId) {
           const balances: Record<number, number> = {};
@@ -563,6 +564,7 @@ export class BonkRoom extends EventEmitter<BonkRoomEvents> {
           };
           this.transport?.sendPacket(OUTGOING_PACKET_IDS.INFORM_IN_LOBBY, informPayload);
         }
+        this.emit('player-join', packet);
         break;
 
       case 'PLAYER_LEAVE':
