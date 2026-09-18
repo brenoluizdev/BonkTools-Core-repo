@@ -23,16 +23,16 @@ const ThrottleSchema = z.object({
   roomCreationJitterMs: z.number().int().min(0).default(2000),
 });
 
-export const AtlasConfigSchema = z.object({
+export const RoomBotConfigSchema = z.object({
   room: RoomSchema,
   throttle: ThrottleSchema.default({}),
   initialStates: z.record(z.string(), z.string()).optional().default({}),
 });
 
-export type AtlasConfig = z.infer<typeof AtlasConfigSchema>;
+export type RoomBotConfig = z.infer<typeof RoomBotConfigSchema>;
 
-export function loadConfig(path: string): AtlasConfig {
-  return AtlasConfigSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
+export function loadConfig(path: string): RoomBotConfig {
+  return RoomBotConfigSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
 }
 
 export function authFromEnv(): AuthOptions {

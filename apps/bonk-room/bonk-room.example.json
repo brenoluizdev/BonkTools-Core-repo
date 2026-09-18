@@ -1,7 +1,7 @@
 {
   "room": {
-    "id": "atlas-main",
-    "name": "ATLAS",
+    "id": "my-room",
+    "name": "My Bonk Room",
     "password": "",
     "maxPlayers": 6,
     "mode": "b",

@@ -3,12 +3,12 @@ import type { Logger } from 'pino';
 import { PickController } from './pick/PickController.js';
 import type { PickConfig } from './pick/PickController.js';
 
-export class AtlasBot {
+export class ExampleBot {
   private readonly pick: PickController;
   private readonly log: Logger;
 
   constructor(room: BonkRoom, logger: Logger, pickCfg: PickConfig) {
-    this.log = logger.child({ component: 'AtlasBot' });
+    this.log = logger.child({ component: 'ExampleBot' });
     this.pick = new PickController(room, pickCfg);
     this.attach(room);
   }

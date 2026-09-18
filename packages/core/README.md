@@ -333,8 +333,8 @@ Cria todas as salas a partir de um array de configs, com stagger + jitter entre 
 ```ts
 await session.startFromConfig({
   rooms: [
-    { id: 'sala-1', name: 'ATLAS', maxPlayers: 6, mode: 'b', rounds: 3 },
-    { id: 'sala-2', name: 'ZEUS',  maxPlayers: 8, mode: 'ar', rounds: 5 },
+    { id: 'sala-1', name: 'Sala Um', maxPlayers: 6, mode: 'b', rounds: 3 },
+    { id: 'sala-2', name: 'Sala Dois', maxPlayers: 8, mode: 'ar', rounds: 5 },
   ],
   throttle: {
     maxConcurrentRooms: 10,
@@ -394,66 +394,27 @@ interface RoomConfig {
 
 ---
 
-## Como o `room-manager` usa a lib
+## Bot de referência: `apps/bonk-room`
 
-O app `room-manager` é o consumidor de referência. O fluxo de inicialização:
+O app [`apps/bonk-room`](../../apps/bonk-room) é o consumidor de referência da lib. O fluxo de inicialização:
 
 ```
-rooms.json (declarativo)
+bonk-room.json (declarativo)
   → loadConfig() — valida via zod
   → authFromEnv() — BONK_USERNAME + BONK_PASSWORD do ambiente
-  → new BonkSession(auth, throttle)
+  → new BonkSession({ auth, throttle })
   → session.getToken()
-  → session.startFromConfig(config)
-  → startRepl(session, rl)  — CLI interativa
+  → session.on('room-added') → new ExampleBot(room, ...)
 ```
 
 Para rodar localmente:
 
 ```bash
-# No diretório do room-manager
-cp .env.example .env
-# Editar .env com BONK_USERNAME e BONK_PASSWORD
-
-pnpm dev -- start --config rooms.example.json
+cd apps/bonk-room
+cp .env.example .env                       # preencha BONK_USERNAME e BONK_PASSWORD
+cp bonk-room.example.json bonk-room.json   # ajuste nome/modo/rounds da sala
+pnpm dev
 ```
-
-O arquivo `rooms.json` tem o mesmo schema de `RoomManagerConfig`:
-
-```json
-{
-  "rooms": [
-    {
-      "id": "1",
-      "name": "ATLAS",
-      "password": "",
-      "maxPlayers": 6,
-      "mode": "b",
-      "rounds": 3,
-      "hidden": false
-    }
-  ],
-  "throttle": {
-    "maxConcurrentRooms": 10,
-    "roomCreationDelayMs": 3000,
-    "roomCreationJitterMs": 2000
-  }
-}
-```
-
-### REPL interativo
-
-Após o start, o REPL aceita:
-
-| Comando | Descrição |
-|---|---|
-| `list` | Lista todas as salas do pool com status |
-| `create <nome>` | Cria nova sala avulsa |
-| `remove <localId>` | Remove sala do pool |
-| `chat <localId> <mensagem>` | Envia chat em uma sala |
-| `kick <localId> <nome>` | Kicka jogador por nome |
-| `help` | Exibe ajuda |
-| `exit` | Encerra graciosamente (SIGTERM) |
 
 ---
 

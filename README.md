@@ -19,7 +19,6 @@ TypeScript monorepo que substitui o acesso ao **bonk.io** via Puppeteer/browser 
   - [BonkSession — múltiplas salas com resiliência 24h](#bonksession--múltiplas-salas-com-resiliência-24h)
 - [Apps incluídos](#apps-incluídos)
   - [bonk-room](#bonk-room)
-  - [room-manager](#room-manager)
 - [Exemplos](#exemplos)
 - [Configuração](#configuração)
 - [Deploy com PM2](#deploy-com-pm2)
@@ -30,7 +29,7 @@ TypeScript monorepo que substitui o acesso ao **bonk.io** via Puppeteer/browser 
 ## Estrutura do monorepo
 
 ```
-BonkTools-Core/
+BonkTools-Core-repo/
 ├── packages/
 │   └── core/                   # @bonktools/core — biblioteca principal
 │       ├── src/
@@ -44,8 +43,8 @@ BonkTools-Core/
 │       └── certs/
 │           └── bonk_fullchain.pem   # CA Sectigo bundlada
 ├── apps/
-│   ├── bonk-room/              # Bot de sala única de football com pick de times
-│   └── room-manager/           # App terminal multi-sala com REPL
+│   ├── bonk-room/              # Bot de referência: sala de football com pick de times
+│   └── blob-seeder/            # Captura IS blobs de mapas (browser real, só p/ seed)
 ├── examples/
 │   └── basic-room/             # Exemplo mínimo de uso da lib
 └── scripts/
@@ -68,7 +67,7 @@ BonkTools-Core/
 ```bash
 # Clonar e instalar dependências
 git clone https://github.com/brenoluizdev/BonkTools-Core-repo.git
-cd BonkTools-Core
+cd BonkTools-Core-repo
 pnpm install
 
 # Compilar a biblioteca core
@@ -291,7 +290,7 @@ BONK_USERNAME=seu_usuario
 BONK_PASSWORD=sua_senha
 ```
 
-Configure a sala em `bonk-room.json`:
+Copie `bonk-room.example.json` para `bonk-room.json` (ignorado pelo git) e configure a sala:
 
 ```json
 {
@@ -328,14 +327,6 @@ NODE_ENV=production pnpm --filter bonk-room start
 
 # Capturar IS blob de uma sala ao vivo
 pnpm --filter bonk-room capture-is https://bonk.io/123456
-```
-
-### room-manager
-
-App terminal para gerenciar múltiplas salas simultaneamente via REPL interativo. Útil para administração manual de salas.
-
-```bash
-pnpm --filter room-manager dev
 ```
 
 ---

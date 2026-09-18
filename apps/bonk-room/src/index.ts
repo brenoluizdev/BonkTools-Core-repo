@@ -1,9 +1,10 @@
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import pino from 'pino';
 import { BonkSession } from '@bonktools/core';
 import type { BonkRoom } from '@bonktools/core';
 import { loadConfig, authFromEnv, pickConfigFromEnv } from './config.js';
-import { AtlasBot } from './AtlasBot.js';
+import { ExampleBot } from './example-bot.js';
 
 // ── Logger ────────────────────────────────────────────────────────────────────
 
@@ -17,7 +18,15 @@ const log = pino(
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-const config = loadConfig(fileURLToPath(new URL('../bonk-room.json', import.meta.url)));
+// `bonk-room.json` é a sua config local (ignorada pelo git). Sem ela, usa o
+// `bonk-room.example.json` versionado — copie-o para `bonk-room.json` e edite.
+const localConfigPath = fileURLToPath(new URL('../bonk-room.json', import.meta.url));
+const exampleConfigPath = fileURLToPath(new URL('../bonk-room.example.json', import.meta.url));
+const configPath = existsSync(localConfigPath) ? localConfigPath : exampleConfigPath;
+if (configPath === exampleConfigPath) {
+  log.warn('bonk-room.json não encontrado — usando bonk-room.example.json (copie-o e edite)');
+}
+const config = loadConfig(configPath);
 const auth = authFromEnv();
 const pickCfg = pickConfigFromEnv(config.initialStates);
 
@@ -46,7 +55,7 @@ session.on('room-added', (localId) => {
   if (!entry) return;
 
   log.info({ localId, shareLink: entry.room.shareLink }, 'sala adicionada ao pool');
-  new AtlasBot(entry.room as BonkRoom, log, pickCfg);
+  new ExampleBot(entry.room as BonkRoom, log, pickCfg);
 });
 
 session.on('room-dead-terminal', ({ localId, reason }) => {
