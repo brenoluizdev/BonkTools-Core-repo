@@ -77,12 +77,12 @@ const MODE_BUTTON_ID: Record<string, string> = {
 
 /** Times ativos por gamemode (football usa só 2; os demais usam 4). */
 const TEAM_COLORS_BY_MODE: Record<string, number[]> = {
-  football: [TEAM_RED, TEAM_BLUE],
-  classic: [TEAM_RED, TEAM_BLUE, TEAM_GREEN, TEAM_YELLOW],
-  arrows: [TEAM_RED, TEAM_BLUE, TEAM_GREEN, TEAM_YELLOW],
-  'death arrows': [TEAM_RED, TEAM_BLUE, TEAM_GREEN, TEAM_YELLOW],
-  grapple: [TEAM_RED, TEAM_BLUE, TEAM_GREEN, TEAM_YELLOW],
-  vtol: [TEAM_RED, TEAM_BLUE, TEAM_GREEN, TEAM_YELLOW],
+  football: [TEAM_BLUE, TEAM_RED],
+  classic: [TEAM_BLUE, TEAM_RED, TEAM_GREEN, TEAM_YELLOW],
+  arrows: [TEAM_BLUE, TEAM_RED, TEAM_GREEN, TEAM_YELLOW],
+  'death arrows': [TEAM_BLUE, TEAM_RED, TEAM_GREEN, TEAM_YELLOW],
+  grapple: [TEAM_BLUE, TEAM_RED, TEAM_GREEN, TEAM_YELLOW],
+  vtol: [TEAM_BLUE, TEAM_RED, TEAM_GREEN, TEAM_YELLOW],
 };
 
 function authFromEnv(): { username: string; password: string } {

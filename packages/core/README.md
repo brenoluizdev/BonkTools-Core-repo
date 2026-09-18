@@ -418,6 +418,18 @@ pnpm dev
 
 ---
 
+## Travar times
+
+```ts
+room.lockTeams();     // jogadores não conseguem mais trocar de time nem sair para o spec
+room.unlockTeams();  // libera de novo
+room.state.teamsLocked; // estado atual
+```
+
+Só o host pode chamar (de outro cliente é ignorado com um aviso). Com os times travados **só o host move jogadores** (`room.setTeam(id, team)` continua funcionando). Quem entra depois do lock já vê a sala travada, e o lock é reaplicado sozinho se a sala for reconstruída (`room-rebuilt`). `setTeamLock(boolean)` continua disponível; `lockTeams`/`unlockTeams` são os atalhos.
+
+---
+
 ## Anti-AFK
 
 ```ts

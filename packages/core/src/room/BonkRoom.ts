@@ -26,6 +26,7 @@ import {
   reduceGameStart,
   reduceGameEnd,
   reduceBalanceSet,
+  reduceTeamsLocked,
 } from './RoomState.js';
 import { defaultReconnectPolicy, computeBackoff } from './ReconnectPolicy.js';
 import { PeerBrokerClient } from '../webrtc/PeerBrokerClient.js';
@@ -114,6 +115,9 @@ export class BonkRoom extends EventEmitter<BonkRoomEvents> {
   private _shareLink: string | null = null;
   private peerBroker: PeerBrokerClient | null = null;
   private antiAfk: AntiAfk | null = null;
+  /** Intenção do host: sobrevive à reconstrução da sala (reaplicada no ROOM_CREATED). */
+  private teamsLockDesired = false;
+  private teamsLockRetry: NodeJS.Timeout | null = null;
 
   constructor(options: BonkRoomOptions) {
     super(); // EventEmitter3
@@ -206,6 +210,7 @@ export class BonkRoom extends EventEmitter<BonkRoomEvents> {
     this.peerBroker?.disconnect();
     this.peerBroker = null;
     this.disableAntiAfk();
+    if (this.teamsLockRetry) { clearTimeout(this.teamsLockRetry); this.teamsLockRetry = null; }
     this._state = createEmptyRoomState();
   }
 
@@ -266,6 +271,11 @@ export class BonkRoom extends EventEmitter<BonkRoomEvents> {
 
   // ─── Phase 4 — Game Flow ──────────────────────────────────────────────────
 
+  /** gs.tl do TRIGGER_START/INFORM_IN_GAME precisa refletir o lock real da sala (o client oficial faz o mesmo). */
+  private withLockState(opts?: StartGameOptions): StartGameOptions {
+    return { ...opts, gs: { tl: this._state.teamsLocked, ...opts?.gs } };
+  }
+
   /**
    * Inicia a partida (packet 5 — TRIGGER_START).
    * ATENÇÃO: o servidor ecoa o campo `is` sem modificar. Sem um blob LZ-String
@@ -278,7 +288,7 @@ export class BonkRoom extends EventEmitter<BonkRoomEvents> {
       return;
     }
     this.pendingGameOpts = opts;
-    const payload = encodeStartGame(this.desiredState, opts);
+    const payload = encodeStartGame(this.desiredState, this.withLockState(opts));
     this.logger.info(
       { engine: payload.gs.ga, mode: payload.gs.mo, rounds: payload.gs.wl, teams: payload.gs.tea, isLen: payload.is.length },
       '[GAME] startGame → enviando TRIGGER_START',
@@ -298,7 +308,7 @@ export class BonkRoom extends EventEmitter<BonkRoomEvents> {
       this.logger.warn({ sid }, 'informInGame: transport não conectado — packet descartado');
       return;
     }
-    const payload = encodeInformInGame(sid, this.desiredState, fc, opts);
+    const payload = encodeInformInGame(sid, this.desiredState, fc, this.withLockState(opts));
     this.logger.info({ sid, fc, stateLen: payload.allData.state.length }, '[GAME] informInGame → enviando INFORM_IN_GAME');
     this.transport.sendPacket(OUTGOING_PACKET_IDS.INFORM_IN_GAME, payload);
   }
@@ -473,13 +483,45 @@ export class BonkRoom extends EventEmitter<BonkRoomEvents> {
     this.transport.sendPacket(OUTGOING_PACKET_IDS.CHANGE_OTHER_TEAM_OTHER, { targetID: id, targetTeam: team });
   }
 
-  /** Bloqueia ou desbloqueia times (packet 7). */
+  /**
+   * Bloqueia ou desbloqueia times (packet 7). Trancados, os jogadores não podem trocar de
+   * time sozinhos — só o host move (`setTeam`). Só o host pode chamar; atualiza `state.teamsLocked`
+   * (usado no INFORM_IN_LOBBY de quem entra depois) e é reaplicado se a sala for reconstruída.
+   */
   setTeamLock(locked: boolean): void {
     if (!this.transport) {
       this.logger.warn({ locked }, 'setTeamLock: transport não conectado — packet descartado');
       return;
     }
+    const { myId, hostId } = this._state;
+    if (myId !== null && hostId !== null && myId !== hostId) {
+      this.logger.warn({ locked }, 'setTeamLock: apenas o host pode travar/destravar times — ignorado');
+      return;
+    }
+    this.teamsLockDesired = locked;
+    if (this._state.teamsLocked === locked) return; // já está assim — evita rajada (rate_limit_tl)
+    this._state = reduceTeamsLocked(this._state, locked);
     this.transport.sendPacket(OUTGOING_PACKET_IDS.TEAM_LOCK, { teamLock: locked });
+  }
+
+  /** Servidor recusou o lock por excesso de pedidos: desfaz o estado local e tenta de novo. */
+  private retryTeamLockLater(): void {
+    this._state = reduceTeamsLocked(this._state, !this.teamsLockDesired);
+    if (this.teamsLockRetry) return;
+    this.teamsLockRetry = setTimeout(() => {
+      this.teamsLockRetry = null;
+      if (this._state.teamsLocked !== this.teamsLockDesired) this.setTeamLock(this.teamsLockDesired);
+    }, 1500);
+  }
+
+  /** Impede os jogadores de trocar de time sozinhos (só o host move). Atalho de `setTeamLock(true)`. */
+  lockTeams(): void {
+    this.setTeamLock(true);
+  }
+
+  /** Libera a troca de time pelos jogadores. Atalho de `setTeamLock(false)`. */
+  unlockTeams(): void {
+    this.setTeamLock(false);
   }
 
   /** Habilita ou desabilita times (packet 32). Persiste em desiredState para INFORM_IN_LOBBY. */
@@ -651,6 +693,7 @@ export class BonkRoom extends EventEmitter<BonkRoomEvents> {
 
       case 'STATUS_MESSAGE':
         this.emit('status-message', packet);
+        if (packet.status === 'rate_limit_tl') this.retryTeamLockLater();
         // CR-02: 'banned' é sempre terminal; 'room_full' só é terminal quando myId===null
         // (Pitfall 3: room_full refere-se a outro jogador quando bot já está na sala)
         if (packet.status === 'banned') {
@@ -686,6 +729,11 @@ export class BonkRoom extends EventEmitter<BonkRoomEvents> {
         // BonkBot: game.id = 0; game.host = 0; (hardcoded ao criar sala).
         this._state = { ...this._state, myId: 0, hostId: 0 };
         this.emit('room-created', packet);
+        // Sala (re)criada: reaplica o lock se o host o tinha ligado antes de uma reconstrução.
+        if (this.teamsLockDesired) {
+          this._state = reduceTeamsLocked(this._state, false); // a sala nova nasce destravada
+          this.setTeamLock(true);
+        }
         break;
 
       case 'ALL_READY_RESET':
@@ -707,6 +755,7 @@ export class BonkRoom extends EventEmitter<BonkRoomEvents> {
         break;
 
       case 'TEAMLOCK_TOGGLE':
+        this._state = reduceTeamsLocked(this._state, packet.locked);
         this.emit('teamlock-toggle', packet);
         break;
 
