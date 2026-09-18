@@ -29,3 +29,7 @@ Variáveis de ambiente e opções: veja `.env.example`.
 ## Espectadores tardios
 
 Com uma partida em andamento, o host deve enviar `INFORM_IN_GAME` **no lugar de** `INFORM_IN_LOBBY` para quem entra (o client só aceita um pacote de dados iniciais). A lib faz isso sozinha; detalhes em [`BONK_PROTOCOL.md`](../../BONK_PROTOCOL.md).
+
+## Exemplos
+
+- [`examples/antiAfk.ts`](examples/antiAfk.ts) — anti-AFK em ~10 linhas: `room.enableAntiAfk()` + eventos `player-afk` / `player-back`. A lógica vive na lib (`packages/core/src/room/AntiAfk.ts`).

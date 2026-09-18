@@ -29,6 +29,8 @@ import {
 } from './RoomState.js';
 import { defaultReconnectPolicy, computeBackoff } from './ReconnectPolicy.js';
 import { PeerBrokerClient } from '../webrtc/PeerBrokerClient.js';
+import { AntiAfk } from './AntiAfk.js';
+import type { AntiAfkOptions } from './AntiAfk.js';
 import type { BonkRoomEvents, BonkRoomOptions, RoomDeadReason } from './types.js';
 import type { RoomState } from './RoomState.js';
 import type { ReconnectPolicy } from './ReconnectPolicy.js';
@@ -111,6 +113,7 @@ export class BonkRoom extends EventEmitter<BonkRoomEvents> {
   private readonly options: BonkRoomOptions;
   private _shareLink: string | null = null;
   private peerBroker: PeerBrokerClient | null = null;
+  private antiAfk: AntiAfk | null = null;
 
   constructor(options: BonkRoomOptions) {
     super(); // EventEmitter3
@@ -177,6 +180,14 @@ export class BonkRoom extends EventEmitter<BonkRoomEvents> {
         this.options.peerID,
         this.logger,
       );
+      this.peerBroker.on('message', (src, data) => {
+        for (const player of this._state.players.values()) {
+          if (player.peerID === src) {
+            this.emit('peer-input', { playerId: player.id, peerID: src, data });
+            break;
+          }
+        }
+      });
       this.peerBroker.connect();
     }
   }
@@ -194,6 +205,7 @@ export class BonkRoom extends EventEmitter<BonkRoomEvents> {
     this.transport = null;
     this.peerBroker?.disconnect();
     this.peerBroker = null;
+    this.disableAntiAfk();
     this._state = createEmptyRoomState();
   }
 
@@ -396,6 +408,26 @@ export class BonkRoom extends EventEmitter<BonkRoomEvents> {
       return;
     }
     this.transport.sendPacket(OUTGOING_PACKET_IDS.CHAT_MESSAGE, { message });
+  }
+
+  /**
+   * Liga a detecção de AFK: jogador sem se mexer nem falar no chat por 12 s (configurável)
+   * durante a partida. Emite `player-afk` (uma vez) e `player-back` quando ele volta.
+   * Movimento exige o evento `peer-input` (modo real com WebRTC).
+   */
+  enableAntiAfk(options?: AntiAfkOptions): void {
+    this.antiAfk?.dispose();
+    this.antiAfk = new AntiAfk(this, options);
+  }
+
+  disableAntiAfk(): void {
+    this.antiAfk?.dispose();
+    this.antiAfk = null;
+  }
+
+  /** true se o jogador está AFK (requer `enableAntiAfk()`). */
+  isAfk(playerId: number): boolean {
+    return this.antiAfk?.isAfk(playerId) ?? false;
   }
 
   /** Kick de jogador sem ban (packet 9 com kickonly: true). */
@@ -629,7 +661,7 @@ export class BonkRoom extends EventEmitter<BonkRoomEvents> {
         break;
 
       case 'SHARE_LINK': {
-        const url = `https://bonk.io/${packet.roomId}${packet.bypass}`;
+        const url = `https://bonk.io/${String(packet.roomId).padStart(6, '0')}${packet.bypass}`;
         this._shareLink = url; // persistir ANTES de emitir — getter disponível em handlers
         this.emit('share-link', packet);
         // Emitir room-rebuilt com o novo link da sala

@@ -91,6 +91,8 @@ export interface PeerBrokerClientEvents {
   open: [];
   error: [Error];
   close: [];
+  /** Mensagem crua recebida de um peer pelo DataChannel (frames de input/física). */
+  message: [src: string, data: Buffer];
 }
 
 /**
@@ -250,6 +252,7 @@ export class PeerBrokerClient extends EventEmitter<PeerBrokerClientEvents> {
       channel.onmessage = (msgEvent) => {
         const data = typeof msgEvent.data === 'string' ? Buffer.from(msgEvent.data) : msgEvent.data;
         this.lastMessage.set(src, data);
+        this.emit('message', src, data);
       };
 
       const sendBootstrap = (): void => {

@@ -653,6 +653,8 @@ Estrutura observada (comparando várias amostras consecutivas):
 | 10 | `63` | Constante — `'c'` (nome do campo 3) |
 | 11 | *varia* | Valor do campo `c` — contador sequencial, +1 por mensagem enviada |
 
+**Confirmado (2026-09-18, jogadores reais):** o host/bot RECEBE esses frames pelo DataChannel. Um frame por evento de tecla (apertar ou soltar); jogador parado NÃO envia nada. `i` = estado das teclas: `0x02` (→), `0x04` (↑), `0x00` (soltou tudo) — outras teclas não mapeadas. Isso permite detectar inatividade sem rodar física: `BonkRoom` emite `peer-input` (`{playerId, peerID, data}`) mapeando o peerID do roster; ver `packages/core/src/room/AntiAfk.ts` (`room.enableAntiAfk()`) e `apps/bonk-room/examples/antiAfk.ts`. Requer as páginas dos jogadores em foreground (Chrome pausa jogo em aba de fundo).
+
 **Não confirmado ainda:** o significado exato do campo `i` (bitmask de teclas?), se existem mais campos em mensagens maiores (ex: posição/velocidade), e — mais importante — **o formato da mensagem de "bootstrap" que o host manda pra um client recém-conectado**.
 
 ### Estado "awaiting first data" — o problema real do jogador tardio

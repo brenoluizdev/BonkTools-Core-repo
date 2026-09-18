@@ -22,7 +22,7 @@ export class ExampleBot {
     });
 
     room.on('share-link', (pkt) => {
-      log.info({ link: `https://bonk.io/${pkt.roomId}${pkt.bypass}` }, 'link da sala');
+      log.info({ link: room.shareLink }, 'link da sala');
     });
 
     room.on('player-join', (pkt) => {

@@ -418,6 +418,19 @@ pnpm dev
 
 ---
 
+## Anti-AFK
+
+```ts
+room.enableAntiAfk();                          // 12 s sem se mexer nem falar no chat (padrão)
+room.on('player-afk',  (id) => room.kickPlayer(id));
+room.on('player-back', (id) => room.chat(`jogador ${id} voltou`));
+room.isAfk(playerId);                          // consulta pontual
+```
+
+Só vigia jogadores em time durante a partida (espectadores e o bot são ignorados). Opções: `enableAntiAfk({ thresholdMs, checkIntervalMs })`. O movimento é detectado pelos frames de input via WebRTC (evento `peer-input`, modo real); o chat, pelo Socket.IO.
+
+---
+
 ## Tratamento de erros
 
 ```ts

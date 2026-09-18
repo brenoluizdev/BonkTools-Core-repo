@@ -226,6 +226,13 @@ export class RoomJoinTimeoutError extends Error {
  * D-06: raw-packet emite todo packet antes de qualquer reducer.
  * D-07: room-dead e room-rebuilt são eventos separados.
  */
+/** Frame cru do DataChannel atribuído a um jogador do roster. */
+export interface PeerInputEvent {
+  playerId: number;
+  peerID: string;
+  data: Buffer;
+}
+
 export interface BonkRoomEvents {
   // ─── Roster events (MOD-01) ───────────────────────────────────────────────
   'room-join':       [packet: RoomJoinPacket];
@@ -236,6 +243,12 @@ export interface BonkRoomEvents {
   'tabbed':          [packet: TabbedPacket];
   'username-change': [packet: UsernameChangePacket];
   'player-pings':    [packet: PlayerPingsPacket];
+  /** Frame de input recebido via WebRTC de um jogador (movimento). Só em modo real. */
+  'peer-input':      [event: PeerInputEvent];
+  /** Jogador ficou parado (sem input nem chat) por 12 s — ver `room.enableAntiAfk()`. */
+  'player-afk':      [playerId: number];
+  /** Jogador que estava AFK voltou a se mexer ou falar. */
+  'player-back':     [playerId: number];
 
   // ─── Room lifecycle events ────────────────────────────────────────────────
   'room-created':  [packet: RoomCreatedPacket];
