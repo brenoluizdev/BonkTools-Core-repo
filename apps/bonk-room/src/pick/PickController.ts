@@ -1,5 +1,5 @@
 import type { BonkRoom, MapBlobCache } from '@bonktools/core';
-import { TEAM_SPEC, TEAM_FFA, TEAM_BLUE, TEAM_RED, TEAM_GREEN, TEAM_YELLOW } from '@bonktools/core';
+import { remapInitialStatePlayers, TEAM_SPEC, TEAM_FFA, TEAM_BLUE, TEAM_RED, TEAM_GREEN, TEAM_YELLOW } from '@bonktools/core';
 
 export { TEAM_SPEC, TEAM_FFA, TEAM_BLUE, TEAM_RED, TEAM_GREEN, TEAM_YELLOW };
 
@@ -60,7 +60,7 @@ type Timer = ReturnType<typeof setTimeout>;
  *  - Times têm SEMPRE o mesmo tamanho ao iniciar (nada de 2v1/3v1): o tamanho `m` é
  *    min(N, ⌊jogadores disponíveis / times usados⌋); sobra vai pro spec.
  *  - 1º jogador → time azul (capitão), 2º → vermelho (capitão). Quando o spec completa
- *    os times, o jogo pára e o capitão do time com menos jogadores escolhe (`!pick n`);
+ *    os times, o jogo pára e o capitão do time com menos jogadores escolhe digitando o NÚMERO no chat;
  *    o último candidato é colocado automaticamente.
  *  - Fim de partida (football): perdedor inteiro → spec (fim da fila); vencedor sempre
  *    vira azul; o 1º da fila vira capitão do vermelho e escolhe os demais.
@@ -504,7 +504,9 @@ export class PickController {
     }
 
     // Chave = número de jogadores ativos (exclui bot): 1=solo, 2=1v1, 4=2v2
-    const is = this.resolveInitialState(bodyIdx - 1);
+    // O blob guarda discos por ID de jogador; reescreve para os IDs reais da sala.
+    const captured = this.resolveInitialState(bodyIdx - 1);
+    const is = captured ? remapInitialStatePlayers(captured, bal) : undefined;
     const opts = is ? { is, gs: { bal } } : undefined;
     this.sendTimer = setTimeout(() => {
       this.sendTimer = null;
@@ -690,7 +692,7 @@ export class PickController {
     const captain = this.roster(team)[0];
     const captainName = captain !== undefined ? this.name(captain) : '?';
     const list = cand.map((id, i) => `${i + 1} - ${this.name(id)}`).join(', ');
-    this.room.chat(`${captainName} (${TEAM_NAME[team]}), escolha: !pick <número>`);
+    this.room.chat(`${captainName} (${TEAM_NAME[team]}), digite o número do jogador que quer escolher:`);
     this.room.chat(`Disponíveis: ${list}`);
   }
 
@@ -779,7 +781,8 @@ export class PickController {
     }
 
     if (this.pickTeam !== null) {
-      const match = lower.match(/^!pick\s+(\d+)$/) ?? lower.match(/^(\d+)$/);
+      // Basta digitar o número ("2"); "!pick 2" continua aceito por compatibilidade.
+      const match = lower.match(/^(\d+)$/) ?? lower.match(/^!pick\s+(\d+)$/);
       if (match) {
         if (this.roster(this.pickTeam)[0] !== senderId) return; // só o capitão escolhe
         const idx = parseInt(match[1]!, 10) - 1;

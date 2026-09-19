@@ -59,10 +59,10 @@ describe('PickController — fluxo do enunciado (maxTeamSize = 2)', () => {
 
     expect(room.stops).toBeGreaterThan(0);
     expect(pick.snapshot().pickTeam).toBe(BLUE);
-    expect(room.chats.some((c) => c.includes('P1 (blue), escolha'))).toBe(true);
+    expect(room.chats.some((c) => c.includes('P1 (blue), digite o número'))).toBe(true);
     expect(room.chats.at(-1)).toBe('Disponíveis: 1 - P3, 2 - P4');
 
-    room.say(1, '!pick 1'); await tick(3000);
+    room.say(1, '1'); await tick(3000);
     expect(room.teamOf(3)).toBe(BLUE);
     expect(room.teamOf(4)).toBe(RED); // último candidato entra automaticamente
     expect(room.starts.at(-1)!.teams).toEqual({ [BLUE]: [1, 3], [RED]: [2, 4] });
@@ -73,12 +73,29 @@ describe('PickController — fluxo do enunciado (maxTeamSize = 2)', () => {
     const { room, pick } = setup(2);
     for (const id of [1, 2, 3, 4]) { room.join(id); await tick(3000); }
     expect(pick.snapshot().pickTeam).toBe(BLUE);
-    room.say(2, '!pick 1'); await tick(100); // vermelho não é capitão da vez
+    room.say(2, '1'); await tick(100); // vermelho não é capitão da vez
     room.say(3, '1'); await tick(100); // candidato também não
     expect(pick.snapshot().pickTeam).toBe(BLUE);
-    room.say(1, '!pick 9'); await tick(100);
+    room.say(1, '9'); await tick(100);
     expect(room.chats.at(-1)).toContain('Número inválido');
     expect(pick.snapshot().pickTeam).toBe(BLUE);
+  });
+
+  it('o capitão escolhe só digitando o número, sem nenhum comando', async () => {
+    const { room } = setup(2);
+    for (const id of [1, 2, 3, 4]) { room.join(id); await tick(3000); }
+    expect(room.chats.some((c) => c.includes('digite o número'))).toBe(true);
+    expect(room.chats.some((c) => c.includes('!pick'))).toBe(false); // a mensagem nem cita o comando
+    room.say(1, '2'); await tick(3000);
+    expect(room.teamOf(4)).toBe(BLUE); // escolheu o 2º da lista (P4)
+    expect(room.teamOf(3)).toBe(RED); // o que sobrou vai pro vermelho
+  });
+
+  it('o comando !pick <n> continua funcionando como alias do número puro', async () => {
+    const { room } = setup(2);
+    for (const id of [1, 2, 3, 4]) { room.join(id); await tick(3000); }
+    room.say(1, '!pick 2'); await tick(3000);
+    expect(room.teamOf(4)).toBe(BLUE);
   });
 
   it('timeout de 30 s escolhe o primeiro da lista', async () => {
@@ -91,7 +108,7 @@ describe('PickController — fluxo do enunciado (maxTeamSize = 2)', () => {
 
   async function fullGame(room: FakeRoom, extra: number[] = [5]): Promise<void> {
     for (const id of [1, 2, 3, 4]) { room.join(id); await tick(3000); }
-    room.say(1, '!pick 1'); await tick(3000); // azul: 1,3 | vermelho: 2,4
+    room.say(1, '1'); await tick(3000); // azul: 1,3 | vermelho: 2,4
     for (const id of extra) { room.join(id); await tick(3000); } // spec
     room.gameRunning = true;
   }
@@ -114,10 +131,10 @@ describe('PickController — fluxo do enunciado (maxTeamSize = 2)', () => {
     // 1º da fila (P5) é o capitão do vermelho e escolhe entre os perdedores
     expect(room.teamOf(5)).toBe(RED);
     expect(pick.snapshot().pickTeam).toBe(RED);
-    expect(room.chats.some((c) => c.includes('P5 (red), escolha'))).toBe(true);
+    expect(room.chats.some((c) => c.includes('P5 (red), digite o número'))).toBe(true);
     expect(room.chats.at(-1)).toBe('Disponíveis: 1 - P1, 2 - P3');
 
-    room.say(5, '!pick 2'); await tick(3000);
+    room.say(5, '2'); await tick(3000);
     expect(room.starts.at(-1)!.teams).toEqual({ [BLUE]: [2, 4], [RED]: [3, 5] });
     expect(room.teamOf(1)).toBe(0); // quem sobrou fica no spec
     assertStartsValid(room, 2);
@@ -191,7 +208,7 @@ describe('AFK', () => {
     room.join(5); await tick(1000);
     expect(pick.snapshot().pickTeam).toBe(BLUE);
     expect(room.chats.at(-1)).toBe('Disponíveis: 1 - P4, 2 - P5'); // P3 (afk) fora da lista
-    room.say(1, '!pick 1'); await tick(3000);
+    room.say(1, '1'); await tick(3000);
     assertStartsValid(room, 2, new Set([3]));
     expect(room.teamOf(3)).toBe(0);
   });
@@ -209,7 +226,7 @@ describe('AFK', () => {
   it('fora de partida (entre jogos) jogador ativo pode ficar afk: sai do time e a vaga é reposta', async () => {
     const { room } = setup(2);
     for (const id of [1, 2, 3, 4]) { room.join(id); await tick(3000); }
-    room.say(1, '!pick 1'); await tick(3000);
+    room.say(1, '1'); await tick(3000);
     room.gameRunning = true;
     room.endGame(); await tick(100); // aguardando vencedor (não é "em partida")
     const startsBefore = room.starts.length;
@@ -259,7 +276,7 @@ describe('Gaps de proporção (nunca 2v1, 3v1, 3v4...)', () => {
   it('sai alguém no meio de 2x2 sem reposição → rebalanceia para 1v1 (sem 2v1)', async () => {
     const { room } = setup(2);
     for (const id of [1, 2, 3, 4]) { room.join(id); await tick(3000); }
-    room.say(1, '!pick 1'); await tick(3000);
+    room.say(1, '1'); await tick(3000);
     room.gameRunning = true;
     room.leave(4); await tick(3000);
     const last = room.starts.at(-1)!;
@@ -271,7 +288,7 @@ describe('Gaps de proporção (nunca 2v1, 3v1, 3v4...)', () => {
   it('sai alguém de 2x2 com espectador esperando → capitão escolhe/repõe e volta 2x2', async () => {
     const { room, pick } = setup(2);
     for (const id of [1, 2, 3, 4, 5]) { room.join(id); await tick(3000); }
-    room.say(1, '!pick 1'); await tick(3000); // azul 1,3 | vermelho 2,4 | spec 5
+    room.say(1, '1'); await tick(3000); // azul 1,3 | vermelho 2,4 | spec 5
     room.gameRunning = true;
     room.leave(4); await tick(3000);
     expect(pick.snapshot().pickTeam).toBeNull(); // único candidato entra sozinho
@@ -282,7 +299,7 @@ describe('Gaps de proporção (nunca 2v1, 3v1, 3v4...)', () => {
   it('todo o time vermelho sai → azul se divide (capitão nos dois times) em vez de 2v0', async () => {
     const { room } = setup(2);
     for (const id of [1, 2, 3, 4]) { room.join(id); await tick(3000); }
-    room.say(1, '!pick 1'); await tick(3000);
+    room.say(1, '1'); await tick(3000);
     room.gameRunning = true;
     room.leave(2); room.leave(4); await tick(3000);
     assertStartsValid(room, 2);
@@ -300,7 +317,7 @@ describe('Gaps de proporção (nunca 2v1, 3v1, 3v4...)', () => {
   it('jogador em campo sai do time sozinho (spectate) → removido, partida reorganizada sem 2v1', async () => {
     const { room } = setup(2);
     for (const id of [1, 2, 3, 4]) { room.join(id); await tick(3000); }
-    room.say(1, '!pick 1'); await tick(3000);
+    room.say(1, '1'); await tick(3000);
     room.gameRunning = true;
     await tick(2000);
     room.selfMove(4, 0); await tick(3000);
@@ -349,11 +366,11 @@ describe('maxTeamSize = 1 e 3', () => {
     const { room, pick } = setup(3);
     for (const id of [1, 2, 3, 4, 5, 6]) { room.join(id); await tick(3000); }
     expect(pick.snapshot().pickTeam).toBe(BLUE);
-    room.say(1, '!pick 1'); await tick(100); // azul leva P3
+    room.say(1, '1'); await tick(100); // azul leva P3
     expect(pick.snapshot().pickTeam).toBe(RED);
-    room.say(2, '!pick 1'); await tick(100); // vermelho leva P4
+    room.say(2, '1'); await tick(100); // vermelho leva P4
     expect(pick.snapshot().pickTeam).toBe(BLUE);
-    room.say(1, '!pick 1'); await tick(3000); // azul leva P5; P6 vai pro vermelho
+    room.say(1, '1'); await tick(3000); // azul leva P5; P6 vai pro vermelho
     expect(room.starts.at(-1)!.teams).toEqual({ [BLUE]: [1, 3, 5], [RED]: [2, 4, 6] });
     assertStartsValid(room, 3);
   });
@@ -417,7 +434,7 @@ describe('Fuzz de invariantes', () => {
           } else if (op === 5) {
             const snap = pick.snapshot();
             const cap = snap.pickTeam !== null ? snap.rosters[snap.pickTeam]?.[0] : undefined;
-            if (cap !== undefined) room.say(cap, `!pick ${1 + Math.floor(rand() * 3)}`);
+            if (cap !== undefined) room.say(cap, String(1 + Math.floor(rand() * 3)));
           } else if (op === 6) {
             room.endGame();
           } else if (op === 7) {

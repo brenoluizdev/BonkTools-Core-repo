@@ -32,7 +32,7 @@ Tudo é calculado a partir de `BONK_MAXTEAMSIZE` (N). Regras do `PickController`
 
 - **Times sempre iguais.** Ao iniciar, cada time tem `min(N, ⌊jogadores disponíveis / times⌋)` jogadores; o excedente espera no spec. Nunca 2v1, 3v1 ou 3v4.
 - **1º jogador → azul, 2º → vermelho** (são os capitães). Os seguintes esperam no spec.
-- **Spec completa os times** → a partida pára e o capitão do time com menos jogadores escolhe com `!pick <número>` (30 s; sem resposta, escolhe o 1º). O último candidato entra sozinho.
+- **Spec completa os times** → a partida pára e o capitão do time com menos jogadores escolhe **digitando o número** do jogador no chat (30 s; sem resposta, escolhe o 1º). O último candidato entra sozinho.
 - **Fim de partida:** o time perdedor inteiro vai para o fim da fila do spec; o vencedor **sempre fica no azul**. O 1º da fila vira capitão do vermelho e escolhe os demais. O vencedor é informado por um jogador em campo com `!win blue` / `!win red` (sem resposta em 20 s, o azul segue).
 - **Saída no meio da partida:** a partida pára; entra um substituto do spec (com escolha, se houver opção) ou os times são rebalanceados.
 - **Troca de time por conta própria** (spec entrando num time, ou jogador saindo do seu) é revertida / tratada como saída.
@@ -42,7 +42,7 @@ Tudo é calculado a partir de `BONK_MAXTEAMSIZE` (N). Regras do `PickController`
 | Comando | Quem | Efeito |
 |---|---|---|
 | `!afk` | qualquer um | alterna AFK: vai para o spec e não pode ser escolhido. **Em partida, quem está jogando não pode ficar AFK.** |
-| `!pick <n>` (ou só `<n>`) | capitão da vez | escolhe o jogador nº *n* da lista |
+| `<n>` (só o número) | capitão da vez | escolhe o jogador nº *n* da lista (`!pick <n>` continua aceito) |
 | `!win blue` / `!win red` | jogador em campo | informa o vencedor |
 | `!start` / `!stop` | jogador em campo | inicia / pára (e segura o reinício até o próximo `!start`) |
 | `!ping` | qualquer um | responde `Pong!` |
