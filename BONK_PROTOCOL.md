@@ -860,6 +860,72 @@ Um host headless que nunca implementou WebRTC/PeerJS (ver [Sincronização de pa
 
 **Lição:** ao debugar esse tipo de sintoma ("cliente conectado mas não sincroniza"), sempre confirmar tanto (a) o handshake de sinalização completou sem `EXPIRE` quanto (b) dados reais estão trafegando pelo canal depois de aberto — os dois podem falhar de forma independente e produzem o mesmo sintoma visível (jogador preso no lobby).
 
+### Pitfall 11 — o IS blob embute os IDs dos jogadores (jogo "congelado" para IDs ≥ 2) — resolvido
+
+**Sintoma (medido em 2026-09-18):** a partida inicia, o disco do jogador aparece cheio e no spawn, mas **não se move** e a bola não sai do lugar. O bot ainda vê o `INFORM`/`GAME_START` normais e o input do jogador chega (`out 4` → `in 7`).
+
+**Evidência:** numa sala recém-criada, com o mesmo blob e `bal: {0:0, N:1}`:
+
+| Jogador solo | Resultado |
+|---|---|
+| id 1 (primeira sessão) | move normalmente e marca ponto |
+| id 2, id 3, id 4... | disco parado no spawn |
+
+Lendo o estado da simulação no client (ver a seção abaixo), num jogador de **id 2** o estado tinha `players: [null, {id: 1, team: 3}]` e `discs: [null, {x, y, ...}]`: só existe disco para o **id 1**, o id do host da sessão em que o blob foi capturado. O jogador real (id 2) não tem disco e portanto seus inputs não movem nada.
+
+**Causa:** o IS blob é o estado inicial serializado pelo client host real; `players`/`discs` são **indexados pelo ID do jogador**. O blob reaproveitado só funciona para os IDs da sessão onde foi capturado. `bal` não corrige isso.
+
+**Impacto:** uma sala 24/7 só funciona enquanto os jogadores em campo tiverem exatamente os IDs do blob (sala recém-criada: 1 solo, 1-2 no 1v1, 1-4 no 2v2). Depois que alguém sai e outros entram, os IDs sobem e as partidas congelam.
+
+**RESOLVIDO (2026-09-19):** o formato do blob foi decodificado e o bonktools reescreve os IDs (`remapInitialStatePlayers`, em `packages/core/src/codec/initialState.ts`). Verificado ao vivo: jogadores solo com id 2 e 3 e um 1v1 com ids altos agora se movem e marcam pontos.
+
+**Formato do IS blob** (o mesmo dos `replaydata` da API do site; round-trip byte a byte):
+
+```
+is = trocaCaixa( LZString.compressToBase64( base64( PSON(estado) ) ) )
+```
+
+- `trocaCaixa`: inverte maiúscula/minúscula dos primeiros 101 caracteres (por isso todo blob começa com `jWcW…`).
+- PSON = dcodeIO/PSON com `StaticPair` e o dicionário fixo do client (`physics, shapes, fixtures, bodies, bro, joints, ppm, ...`, mais 65535 e 16777215).
+- Estado decodificado (football, solo): `{scores, goalHeight, borderThickness..., ppm, fte, ftu, lscr, ni, ball, players: [null, {id, team}], seed, discs: [null, {x, y, xv, yv, team, kickReady}], sts, rc}`. `players` e `discs` são indexados pelo **ID do jogador**.
+- Como foi achado: um setter em `Object.prototype` para `players`/`seed` mostrou a pilha `PSON.decode ← r2z.fromDatabase`; `fromDatabase` faz a troca de caixa, `LZString.decompressFromBase64`, `ByteBuffer.fromBase64` e `PSON.decode`.
+
+---
+
+## Placar e fim de partida — o que é (e o que não é) observável
+
+**Pelo protocolo, nada.** Verificado em 2026-09-18 com dois clients reais (Chrome headless) em uma partida que termina por pontuação:
+
+- `13 GAME_END` (`42[13]`, sem payload) só chega quando o **host** manda `RETURN_TO_LOBBY` (out 14).
+- `31 Send Debug Winner` / `38 Debug Winner` (DemystifyBonk) são código morto no client atual: nunca são enviados nem recebidos.
+- No fim natural da partida ("BLUE TEAM WINS"), os clients **não enviam e não recebem nenhum frame** no WebSocket; voltam ao lobby localmente.
+- O DataChannel WebRTC só carrega os mesmos frames de input (12 bytes, `83 b1 69 ...`); não há mensagem de fim/placar.
+- O placar ("Blue 1 / Red 0", "BLUE TEAM SCORES") é desenhado no canvas; o DOM não tem nenhum texto de placar.
+- `38 Send Req XP` é enviado pelo client de contas registradas ao fim do round, mas vai só ao servidor.
+
+**Pelo client, sim.** O estado da simulação em cada client é um objeto JS com nomes de propriedade **não ofuscados**: `scores`, `lscr`, `discs`, `players`, `ball`, `seed`, `fc`, `inputs`, `wl`... (o client mantém centenas desses estados no buffer de rollback). Como o objeto é criado por atribuição de `scores`, um *setter* em `Object.prototype` instalado antes do jogo carregar (`evaluateOnNewDocument`) captura a referência do estado mais recente a cada frame, sem alterar o código do jogo:
+
+```js
+Object.defineProperty(Object.prototype, 'scores', {
+  configurable: true,
+  set(v) { window.__last = this;
+    Object.defineProperty(this, 'scores', { value: v, writable: true, configurable: true, enumerable: true }); },
+  get() { return undefined; },
+});
+```
+
+Medido numa partida de 3 pontos (football, jogador azul empurrando a bola):
+
+| t | `window.__last.scores` |
+|---|---|
+| 0,5 s | `[0,0,0,0]` |
+| 5,6 s | `[0,0,0,1]` |
+| 17,9 s | `[0,0,0,2]` |
+| 30,2 s | `[0,0,0,3]` → "BLUE TEAM WINS" |
+| 33,4 s | `[]` (client já no lobby) |
+
+`scores` é indexado pelo **id do time** (2 = vermelho, 3 = azul). Portanto **um client de navegador (árbitro) pode reportar o vencedor**: quando `scores[time] >= gs.wl`. Não há como fazer isso sem um client que rode a simulação.
+
 ---
 
 ## URL das salas
